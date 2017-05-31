@@ -1,0 +1,1 @@
+copy /b sdcard.spr+finger.spr+letters.spr+ngcd.spr sprites.bin
