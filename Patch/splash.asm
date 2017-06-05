@@ -7,6 +7,8 @@
     ORG $C20A8E
 	BINCLUDE "sdcard.pal"
 
+	ORG $C168C0
+	move.l #360,$101B2E			; Reduce splash duration (10s -> 6s)
 
 	ORG $C16E14
 	dc.w 112					; X position for finger image
@@ -17,8 +19,8 @@
 
 	ORG $C20A4E
 	BINCLUDE "finger.pal"
-	
-	
+
+
 	ORG $C201C2
 	BINCLUDE "S.map"
 

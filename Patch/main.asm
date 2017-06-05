@@ -3,29 +3,43 @@
     INCLUDE "regdefs.asm"
 
 	INCLUDE "splash.asm"
-	
+
 FixValueList	equ		$10E000	; OK ?
 
 
-	
+    ORG $C0C854
+	jmp     PUPPETStuff
+
 	ORG $C0E7C0
 	nop							; Disable CD player display
 	nop
-	
+
 	ORG $C0EBC8
 	nop							; Disable "WAIT..." message
 	nop
 
 	ORG $C0EBF2
-	nop							; Disable "WAIT..." message
+	nop							; Disable "WAIT..." message (again)
 	nop
 
 	ORG $C10206
     jmp     LoadFromCD
 
-	
-	
+
+
 	ORG $C19000
+PUPPETStuff:
+	move.w  #0,($FF0000).l		; Copied from original routine, required for PUPPET init
+	move.w  #$550,($FF0002).l
+    move.w  #$731,($FF0004).l
+    move.b  #$FE,($FF0011).l
+    move.b  #$3C,($FF000E).l
+	move.w  #7,(REG_IRQACK).l
+	andi.w  #$F8FF,sr
+
+	jsr     InitSD
+	rts
+
 WriteFix:
     move.w  #32,REG_VRAMMOD
     nop
@@ -44,7 +58,7 @@ WriteFix:
     bra     .write
 .strend:
 	rts
-	
+
 .reloc:
     moveq.l #0,d3
     move.b  (a0)+,d3
@@ -78,11 +92,16 @@ WriteFix:
 	bne     .writelong
     bra     .write
 
-
+;$00: End of string
+;$01: Move from origin X, Y
+;$Fx: Print stored longword
 FixStrSecReq:
-    dc.b "LOAD --MMSSFF",1,5,1,$F0,0
+    dc.b "LOAD MMSSFF ",$F0,0
 FixStrSecHex:
-    dc.b "ISO ADDRESS",1,5,1,$F0,0
+    dc.b "ISO ADDRESS ",$F0,0
+FixStrSecCount:
+	dc.b "SECTORS CNT ",$F0,0
+
 
 BCDtoHex:
     andi.l  #$FF,d0
@@ -93,10 +112,10 @@ BCDtoHex:
     add.b   d1,d0
     rts
 
-    
+
 LoadFromCD:
 	lea     PALETTES,a0			; LoadFromCD jump patch
-	move.w  #BLACK,(a0)+
+	move.w  #BLACK,(a0)+		; Set up palettes for text
 	move.w  #WHITE,(a0)+
 	move.w  #BLACK,(a0)
 
@@ -107,7 +126,7 @@ LoadFromCD:
     lea     FixStrSecReq,a0
 	move.w  #FIXMAP+6+(6*32),d0
 	move.w  #$0000,d1
-	jsr     WriteFix
+	jsr     WriteFix            ; Display requested MSF
 
 	lea     $10F6C8,a0			; MSF
 	moveq.l #0,d3
@@ -129,13 +148,23 @@ LoadFromCD:
     lea     FixValueList,a0
 	move.l  d3,(a0)
     lea     FixStrSecHex,a0
+	move.w  #FIXMAP+7+(6*32),d0
+	move.w  #$0000,d1
+	jsr     WriteFix            ; Display address for ISO file
+
+	moveq.l #0,d0
+	move.w  $10F688,d0
+    lea     FixValueList,a0
+	move.l  d0,(a0)
+    lea     FixStrSecCount,a0
 	move.w  #FIXMAP+8+(6*32),d0
 	move.w  #$0000,d1
-	jsr     WriteFix
+	jsr     WriteFix            ; Display number of sectors to load
 
 .lp
 	bra     .lp
 
+	INCLUDE "sdcard.asm"
 
     ORG $C6FEB0
 	BINCLUDE "sprites.bin"
