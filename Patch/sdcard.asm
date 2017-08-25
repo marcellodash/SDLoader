@@ -31,16 +31,14 @@
 ;12MHz / 32 = 375kHz for slow SPI ?
 ;Is 12MHz safe for fast SPI ?
 ;
-;Magic bytes to unlock SD access: $741C
-;Magic bytes to lock SD access: $57F1
-;
-;Writes to system ROM space ? Can we catch /WR ?
-;$C00000: Lock/unlock (write only)
-;$C00002: SD byte write. LSByte = data, MSByte = flags
-;		Flags: bit8 = send byte
-;       	   bit9 = CS state
-;			   bit15 = high speed
-;$C80000: SD byte read (LSByte)
+; "Writes" are done by reading at specific addresses:
+; Lock: $C04652 or $C04653
+; Unlock: $C046A0 or $C046A1
+; Write byte: $C04400~$C04401 to $C045FE~$C045FF (shift left once)
+; Read byte: $C04800 or $C04801
+; CS: $C04600 or $C04601 for 0, $C04610 or $C04611 for 1
+; Speed:  $C04700 or $C04701 for SLOW, $C04710 or $C04711 for FAST
+; Status: Read $C04900 or $C04901
 
 InitSD:
 	jsr     UnlockSD
@@ -54,7 +52,8 @@ InitSD:
 
     move.b  #50,d7				; Max tries
 .cmd0:
-	move.w  #$0140,d0			; CS low, low speed, CMD0
+	move.w  #$0100,d0			; CS low, low speed, CMD0
+	move.l  #0,d2				; No parameter
 	jsr     SDCommand
 	jsr     GetR1
 	cmp.b   #$01,d0				; Idle state ?
@@ -120,15 +119,13 @@ InitSD:
 .blocklenok:
 
 	; We can go full speed now
-
 	move.w  #$0200,d0			; CS high
-	
-	moveq.l #5,d0				; Error step 5: Not an error, success !
-	jmp		Error
+	jsr     PutByteSPI
 	rts
 	
 
 Delay:
+	move.b  d0,REG_DIPSW
     nop
     nop
     nop
@@ -140,6 +137,7 @@ Delay:
     rts
     
 GetR1:
+	move.b  d0,REG_DIPSW
 	moveq.l #10,d6				; Max tries
 .try:
 	move.w  #$01FF,d0			; CS low, low speed, data all ones
@@ -152,6 +150,7 @@ GetR1:
     rts
     
 GetR2:
+	move.b  d0,REG_DIPSW
     jsr     GetR1
     lsl.w   #8,d0
     move.w  d0,d1
@@ -181,15 +180,16 @@ SDCommand:
 	ori.b   #64,d0				; Command byte
 	jsr     PutByteSPI
 
-	move.b  d2,d0				; Parameter (little-endian)
+	rol.l   #8,d2               ; Parameter AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD
+	move.b  d2,d0               ;           BBBBBBBB CCCCCCCC DDDDDDDD AAAAAAAA
 	jsr     PutByteSPI
-	lsr.l   #8,d2
+	rol.l   #8,d2				;           CCCCCCCC DDDDDDDD AAAAAAAA BBBBBBBB
 	move.b  d2,d0
 	jsr     PutByteSPI
-	lsr.l   #8,d2
+	rol.l   #8,d2				;           DDDDDDDD AAAAAAAA BBBBBBBB CCCCCCCC
 	move.b  d2,d0
 	jsr     PutByteSPI
-	lsr.l   #8,d2
+	rol.l   #8,d2				;           AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD
 	move.b  d2,d0
 	jsr     PutByteSPI
 
@@ -204,31 +204,76 @@ SDCommand:
 	jsr     PutByteSPI
 	rts
 
+
 PutByteSPI:
-	move.w  d0,$C00002
-.wait:
-	nop
-	move.w  $C80000,d0
+	move.b  d0,REG_DIPSW
+
+	movea.l #$C04710,a0
 	btst.l  #8,d0
+    beq     .fast
+	movea.l #$C04700,a0
+.fast:
+    move.w  (a0),d4
+    
+	movea.l #$C04610,a0
+	btst.l  #9,d0
+    bne     .cs_high
+	movea.l #$C04600,a0
+.cs_high:
+    move.w  (a0),d4
+
+	movea.l #$C04400,a0
+	lsl.w   #1,d0
+	andi.l  #$1FE,d0
+	adda.l  d0,a0
+    move.w  (a0),d4
+
+	move.l  #$1FFFF,d4
+.wait:
+	move.b  d0,REG_DIPSW
+	nop
+	move.w  $C04900,d0
+	btst.l  #0,d0
+	beq     .done
+	subq.l  #1,d4
 	bne     .wait
+	moveq.l #9,d0				; Error 9: SPI timeout
+	jmp		Error
+.done:
+
+	move.b  $C04800,d0
 	rts
-	
+
 Error:
+	lea     PALETTES,a0			; Set up palettes for text
+	move.w  #BLACK,(a0)+
+	move.w  #WHITE,(a0)+
+	move.w  #BLACK,(a0)
+	
+	move.b  #1,REG_ENVIDEO
+	move.b  #0,REG_DISBLSPR
+	move.b  #0,REG_DISBLFIX
+
     lea     FixValueList,a0
 	move.l  d0,(a0)
     lea     FixStrSDError,a0
 	move.w  #FIXMAP+4+(4*32),d0
 	move.w  #$0000,d1
 	jsr     WriteFix
-    rts
+.lockup:
+	move.b  d0,REG_DIPSW
+	nop
+	nop
+	nop
+    bra     .lockup
     
 FixStrSDError:
     dc.b    "SD CARD ERR ",$F0,0
 
 LockSD:
-    move.w  #$57F1,$C00000
+    move.w  $C04652,d0
 	rts
 
 UnlockSD:
-    move.w  #$741C,$C00000
+    move.w  $C046A0,d0
     rts
