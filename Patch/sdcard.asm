@@ -258,7 +258,6 @@ Error:
 	move.l  d0,(a0)
     lea     FixStrSDError,a0
 	move.w  #FIXMAP+4+(4*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix
 .lockup:
 	move.b  d0,REG_DIPSW

@@ -1,6 +1,7 @@
 WriteFix:
 	move.b  d0,REG_DIPSW
     movem.l d2-d7/a1,-(sp)
+	move.w  FixWriteConfig,d1
 	move.w  #32,REG_VRAMMOD
     nop
     nop

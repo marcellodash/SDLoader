@@ -11,14 +11,17 @@ SDLoadStart		equ		$10E108 ; Longword
 CDSectorCount	equ		$10E10C	; Word
 SDSectorCount	equ		$10E110	; Longword
 
+FixWriteConfig	equ		$10E120 ; Word
+
 
     ORG $C0C854
 	jmp     PUPPETStuff			; Called at startup
 
-	ORG $C11774
-	lea     $100040,a6        	; Disable CD player display and erase finger from splash screen
-	move.b  #0,4(a6)			; Sprite height
-	bra     $C16CF2				; SpriteUpdateVRAM
+	ORG $C0E712
+	jmp     DrawProgressAnimation	; Don't draw loading progress animation
+	
+	ORG $C0E8D2
+	bra     $C0E968
 
 	ORG $C0EB96
 	nop                         ; Disable CD mech detection in CheckCDValid
@@ -51,8 +54,14 @@ SDSectorCount	equ		$10E110	; Longword
 	move.b  d0,REG_DIPSW
 	bra     $C0EC3A				; Skip first sector loading wait, there's no more CD :)
 
+	ORG $C0EDA2
+	bra     $C0EE00             ; Same
+
+	ORG $C0EE04
+	nop							; Bypass CD lid check
+
     ORG $C0EE0C
-	jmp     InvalidCD
+	jmp     CDCheckDone
 
 	ORG $C0EF4C
 	tst.w   $10F688				; "SectorCounter"
@@ -60,13 +69,30 @@ SDSectorCount	equ		$10E110	; Longword
 	jsr     LoadCDSectorFromSD
 	bra     $C0EF66
 
-	ORG $C0EF6C
+	ORG $C0EF6C					; Bypass CD lid check
 	nop
 	nop
 	nop
 
+	ORG $C0F0AE					; Disable waiting for CD to stop after game load
+	nop
+	nop
+	
+	ORG $C0F4E8					; Disable waiting for CD to stop after BIOSF_LOADFILE
+	nop
+	nop
 
+	ORG $C0F324
+	bra     $C0F348				; Prevent loading custom loading screens
+	ORG $C0F382
+	bra     $C0F3AA             ; Same
 
+	ORG $C0F5FC
+	jmp     LoadFile			; Patch original LoadFile
+
+	ORG $C0FD78
+	jsr     LoadCDSectorFromSD
+	bra     $C0FD88
 
 	ORG $C0FFA2					; WaitForCD
 	jsr     LoadCDSectorFromSD
@@ -81,31 +107,16 @@ SDSectorCount	equ		$10E110	; Longword
 	jsr     LoadCDSectorFromSD
 	rts
 
-	ORG $C0FD78
-	jsr     LoadCDSectorFromSD
-	bra     $C0FD88
-
 	ORG $C10206
-    jmp     LoadFromCD			; Patch original LoadFromCD (multiple calls)
+    jmp     LoadFromCD			; Patch original "LoadFromCD" (multiple calls)
 
-	ORG $C0F5FC
-	jmp     LoadFile			; Patch original LoadFile
-	
-	ORG $C0F324
-	bra     $C0F348				; Prevent loading custom loading screens
-	ORG $C0F382
-	bra     $C0F3AA             ; Same
-	ORG $C0EDA2
-	bra     $C0EE00             ; Same
-
-	ORG $C0E712
-	jmp     DrawProgressAnimation	; Don't draw loading progress animation
-	
-	ORG $C0EE04
-	nop							; Bypass CD lid check
+	ORG $C11774
+	lea     $100040,a6        	; Disable CD player display and erase finger cursor from splash screen
+	move.b  #0,4(a6)			; Sprite height
+	bra     $C16CF2				; "SpriteUpdateVRAM"
 
 
-	; New code:
+	; New code starts from here ---------------------------
 
 	ORG $C19000
 PUPPETStuff:
@@ -116,60 +127,39 @@ PUPPETStuff:
     move.b  #$3C,($FF000E).l
 	move.w  #7,(REG_IRQACK).l
 	andi.w  #$F8FF,sr
+	
+	move.w  #$0000,FixWriteConfig
 
-	jsr     InitSD
+	jsr     InitSD              ; Added
 	rts
 
-;$00: End of string
-;$01: Move from origin X, Y
-;$Fx: Print stored longword
-FixStrReqSec:
-    dc.b "LOAD MMSSFF ",$F0,0
-FixStrIsoAddr:
-    dc.b "ISO ADDRESS ",$F0,0
-FixStrCDSecCnt:
-	dc.b "CD SECTORS  ",$F0,0
-FixStrSDAddr:
-	dc.b "SD ADDRESS  ",$F0,0
-FixStrSDSecCnt:
-	dc.b "SD SECTORS  ",$F0,0
-FixStrSubSecCnt:
-	dc.b "SUBSECTOR   ",$F0,0
-
-FixStrClear:
-    dc.b "            ",0
-FixStrSector:
-	dc.b "SEC ",$F0,0
-	
 	
 DrawProgressAnimation:
     lea     FixValueList,a0
     moveq.l #0,d0
-	move.w  $10F688,d0			; Sector counter
+	move.w  $10F688,d0			; "SectorCounter"
 	move.l  d0,(a0)
-	
     lea     FixStrSector,a0
 	move.w  #FIXMAP+16+(18*32),d0
-    move.w  #$3100,d1
     jsr     WriteFix 			; Display sector counter
 	rts
 
 
 LoadFile:
+	move.w  #$3100,FixWriteConfig
+
     lea     FixStrClear,a0
 	move.w  #FIXMAP+16+(4*32),d0
-    move.w  #$3100,d1
     jsr     WriteFix 			; Clear file name line
 
-    movea.l $76A0(a5),a0
+    movea.l $10F6A0,a0			; "FilenamePtr"
 	move.w  #FIXMAP+16+(4*32),d0
-    move.w  #$3100,d1
     jsr     WriteFix 			; Display filename
 
 	moveq.l #0,d0				; Copied from original routine
-    move.b  $76C2(a5),d0
+    move.b  $10F6C2,d0			; "FileTypeCode"
     lsl.b   #2,d0
-    lea     $C0F60A,a0
+    lea     $C0F60A,a0			; "JTFileLoaders"
     movea.l 0(a0,d0),a0
     jmp     (a0)
 
@@ -184,23 +174,23 @@ BCDtoHex:
     rts
 
 
-InvalidCD:                      ; Bad name for this :(
-	;moveq.l #5,d0				; Error step 5: System ROM called "InvalidCD" routine
-	;jmp		Error
+CDCheckDone:
 	;lea     $1113C2,a1			; "CDSectorBuffer" + 0x1BE (first partition entry)
 	tst.b   $10F656				; "CDValidFlag"
 	bne     .valid
 	lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
 	bra     DumpMemory
 .valid:
+	clr.b   $10F6B6				; Original code "CDLoadBusy"
+	bclr    #0,$10F656          ; Original code "CDValidFlag"
 	jmp     $C0EE4E				; Return to original code
 
 
 LoadFromCD:
-    movem.l d0-d7/a0-a6,-(sp)
+    movem.l d0-d7/a0-a6,-(sp)	; LoadFromCD jump patch
 
 	move.b  d0,REG_DIPSW
-	lea     PALETTES,a0			; LoadFromCD jump patch
+	lea     PALETTES,a0
 	move.w  #BLACK,(a0)+		; Set up palettes for text
 	move.w  #WHITE,(a0)+
 	move.w  #BLACK,(a0)
@@ -215,7 +205,6 @@ LoadFromCD:
 	move.l  d0,(a0)
     lea     FixStrReqSec,a0
 	move.w  #FIXMAP+6+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Display requested MSF
 	move.b  d0,REG_DIPSW
 
@@ -242,7 +231,6 @@ LoadFromCD:
 	move.l  d3,(a0)
     lea     FixStrIsoAddr,a0
 	move.w  #FIXMAP+7+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Display address in ISO file
 	move.b  d0,REG_DIPSW
 
@@ -253,7 +241,6 @@ LoadFromCD:
 	move.l  d0,(a0)
     lea     FixStrCDSecCnt,a0
 	move.w  #FIXMAP+8+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Display number of sectors to load
 	move.b  d0,REG_DIPSW
 
@@ -267,7 +254,6 @@ LoadFromCD:
 	move.l  d0,(a0)
     lea     FixStrSDAddr,a0
 	move.w  #FIXMAP+9+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Display absolute address of loading start in SD card
 	move.b  d0,REG_DIPSW
 
@@ -280,7 +266,6 @@ LoadFromCD:
 	move.l  d0,(a0)
     lea     FixStrSDSecCnt,a0
 	move.w  #FIXMAP+10+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Display absolute address of loading start in SD card
 	move.b  d0,REG_DIPSW
 
@@ -291,6 +276,7 @@ LoadFromCD:
 	INCLUDE "print.asm"
 	INCLUDE "sdcard.asm"
 	INCLUDE "fat32.asm"
+	INCLUDE "strings.asm"
 
 	ORG $C20C10   				; Replace palette #3 during loading screen (for debug text)
 	dc.w BLACK, WHITE, BLACK

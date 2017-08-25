@@ -54,7 +54,7 @@ LoadCDSectorFromSD:
 	lea     $111204,a1			; "CDSectorBuffer"
 .readsectors:
 
-	move.w  #$0111,d0			; CS low, low speed, CMD17 (17 = $11)
+	move.w  #$0011,d0			; CS low, high DEBUG!!! speed, CMD17 (17 = $11)
 	move.l  SDLoadStart,d2
 	jsr     SDCommand
 	jsr     GetR1
@@ -67,7 +67,7 @@ LoadCDSectorFromSD:
 	move.b  d0,REG_DIPSW		; Wait for data token
 	moveq.l #100,d6				; Max tries
 .try:
-	move.w  #$01FF,d0			; CS low, low speed, data all ones
+	move.w  #$00FF,d0			; CS low, high DEBUG!!! speed, data all ones
 	jsr     PutByteSPI
 	cmp.b   #$FE,d0
 	beq     .gottoken
@@ -79,15 +79,15 @@ LoadCDSectorFromSD:
 
 	move.w  #512,d6
 .readonesector:
-	move.w  #$01FF,d0			; CS low, low speed, data all ones
+	move.w  #$00FF,d0			; CS low, high DEBUG!!! speed, data all ones
 	jsr     PutByteSPI
 	move.b  d0,(a1)+
 	subq.w  #1,d6
 	bne     .readonesector
 
-	move.w  #$01FF,d0			; Discard CRC
+	move.w  #$00FF,d0			; Discard CRC
 	jsr     PutByteSPI
-	move.w  #$01FF,d0
+	move.w  #$00FF,d0
 	jsr     PutByteSPI
 
 	move.w  #$0200,d0			; CS high
@@ -100,14 +100,12 @@ LoadCDSectorFromSD:
 	move.l  SDLoadStart,(a0)
     lea     FixStrSDAddr,a0
 	move.w  #FIXMAP+12+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Display absolute address of loading start in SD card
 
     lea     FixValueList,a0
 	move.l  d7,(a0)
     lea     FixStrSubSecCnt,a0
 	move.w  #FIXMAP+13+(6*32),d0
-	move.w  #$0000,d1
 	jsr     WriteFix            ; Show that we've succefully loaded a new sector
 
 	tst.l   d7
