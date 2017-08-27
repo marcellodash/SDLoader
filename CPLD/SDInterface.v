@@ -1,3 +1,6 @@
+// Last news:
+// Things should work pretty nicely, but the darn SRAM is unusable and flash is too slow !
+
 module SDInterface(
 	input CLOCK_50,
 	input [1:0] CLOCK_24,
@@ -11,13 +14,13 @@ module SDInterface(
 	input [30:21] GPIO_0_I3,
 	inout [35:31] GPIO_0_IO4,
 	
-	/*output [17:0] SRAM_ADDR,
+	output [17:0] SRAM_ADDR,
 	inout [15:0] SRAM_DQ,
 	output SRAM_CE_N,
 	output SRAM_OE_N,
-	output SRAM_WE_N,
+	output reg SRAM_WE_N,
 	output SRAM_UB_N,
-	output SRAM_LB_N,*/
+	output SRAM_LB_N,
 	
 	output [21:0] FL_ADDR,
 	input [7:0] FL_DQ,
@@ -39,19 +42,14 @@ module SDInterface(
 	input SPI_MISO		// SD_DAT
 );
 
-// Todo: Fast SPI_CLK is 12MHz, make it 24MHz ?
+//reg [7:0] CPU_DATA_LOW;
+//reg [7:0] CPU_DATA_HIGH;
+//reg [7:0] READ_TIMER;
+//reg PREV_OE;
+//reg PREV_PREV_OE;
+//reg LSB;
 
-// $C00000 = 11000000 00000000 00000000
-// $C7FFFF = 11000xxx xxxxxxxx xxxxxxx-
-//               ^
-
-reg [7:0] CPU_DATA_LOW;
-reg [7:0] CPU_DATA_HIGH;
-
-reg [7:0] READ_TIMER;
-reg PREV_OE;
-reg PREV_PREV_OE;
-reg LSB;
+wire [15:0] CPU_DATA;
 
 reg CARD_LOCK;
 reg [7:0] SPI_OUT;
@@ -60,16 +58,31 @@ reg HIGH_SPEED;
 reg [4:0] CLK_DIV;
 wire [4:0] CLK_DIV_MAX;
 reg [4:0] STEP_COUNTER;
-wire [15:0] CPU_DATA;
 wire BUSY;
+wire READ_SPI_BYTE;
+wire READ_SPI_STATUS;
+wire nRESET;
 
-wire [17:0] M68K_ADDR;		// 512k words
+wire [17:0] M68K_ADDR;		// 256kWords = 512kBytes
 wire [15:0] M68K_DATA_IN;
 wire nSYSROM_OE;
-wire READ;
+reg [18:0] COPY_FROM;		// Flash bytes
+reg [17:0] COPY_TO;			// SRAM words
+reg STATE;
+reg [5:0] COPY_TIMER;
+reg [15:0] SRAM_DATA_REG;
+//wire READ;
 
 assign M68K_ADDR = {	GPIO_0_I3[21], GPIO_0_I3[30:29], GPIO_0_I3[27:22], GPIO_0_I1[0], GPIO_0_I1[1], GPIO_0_I1[2],
 							GPIO_0_I1[3], GPIO_0_I1[4], GPIO_0_I1[5], GPIO_0_I1[6], GPIO_0_I1[7], GPIO_0_I1[8]};
+
+assign SRAM_ADDR = STATE ? 18'd0 : COPY_TO;	// M68K_ADDR
+assign SRAM_DQ = STATE ? 16'bzzzzzzzzzzzzzzzz : SRAM_DATA_REG;
+
+assign SRAM_CE_N = SRAM_OE_N;
+assign SRAM_OE_N = STATE ? 1'b1 : 1'b1;	// nSYSROM_OE
+assign SRAM_UB_N = 1'b0;
+assign SRAM_LB_N = 1'b0;
 
 //A8 GPIO_0[0]
 //A7 GPIO_0[1]
@@ -124,11 +137,9 @@ assign {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO2[15],
 			GPIO_0_IO2[20], GPIO_0_IO2[18], GPIO_0_IO2[13], GPIO_0_IO2[11],
 			GPIO_0_IO4[32], GPIO_0_IO4[34], GPIO_0_IO2[14], GPIO_0_IO2[16],
 			GPIO_0_IO2[19], GPIO_0_IO2[17], GPIO_0_IO2[12], GPIO_0_IO2[10]} =
-			nSYSROM_OE ? 16'bzzzzzzzzzzzzzzzz : // CPU_DATA;
-			READ_SPI_STATUS ? {7'b0000000, BUSY} : //CPU_DATA;
-			READ_SPI_BYTE ? {SPI_IN, SPI_IN} : CPU_DATA;
-			/*READ_SPI_BYTE ? {SPI_IN, SPI_IN} :
-			READ_SPI_STATUS ? {7'b0000000, BUSY} : CPU_DATA;*/
+			nSYSROM_OE ? 16'bzzzzzzzzzzzzzzzz :
+			READ_SPI_STATUS ? {7'b0000000, BUSY} :
+			READ_SPI_BYTE ? {SPI_IN, SPI_IN} : SRAM_DQ;
 			
 assign M68K_DATA_IN = {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO2[15],
 			GPIO_0_IO2[20], GPIO_0_IO2[18], GPIO_0_IO2[13], GPIO_0_IO2[11],
@@ -138,18 +149,17 @@ assign M68K_DATA_IN = {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO
 assign nRESET = KEY[0];
 assign LEDG[0] = CARD_LOCK;
 assign LEDG[1] = BUSY;
-assign LEDG[7:2] = 6'd0;
-//assign LEDG[6:2] = 5'd0;
+assign LEDG[2] = STATE;
+assign LEDG[7:3] = 5'd0;
 //assign LEDG[7] = PS2_DAT;
 
 assign FL_CE_N = 1'b0;
 assign FL_OE_N = 1'b0;
 assign FL_WE_N = 1'b1;
 assign FL_RST_N = 1'b1;
+assign FL_ADDR = {3'b000, COPY_FROM};
 
-assign FL_ADDR = {3'b000, M68K_ADDR, LSB};
-
-assign CPU_DATA = {CPU_DATA_HIGH, CPU_DATA_LOW};
+//assign CPU_DATA = {CPU_DATA_HIGH, CPU_DATA_LOW};
 
 assign CLK_DIV_MAX = HIGH_SPEED ? 5'd1 : 5'd30;
 assign SPI_MOSI = SPI_OUT[7];
@@ -159,105 +169,152 @@ assign BUSY = |{STEP_COUNTER};
 
 SEG7_LUT_4 U1(HEX0, HEX1, HEX2, HEX3, FL_ADDR[15:0]);
 
-assign READ = ~PREV_OE & PREV_PREV_OE;
+//assign READ = ~PREV_OE & PREV_PREV_OE;
 
 always @(posedge CLOCK_50)
 begin
 	if (!nRESET)
 	begin
+		COPY_FROM <= 19'd0;
+		COPY_TO <= 18'd0;
+		COPY_TIMER <= 6'd0;
+		STATE <= 1'b0;			// Copy !
+		
 		CARD_LOCK <= 1'b1;
 		STEP_COUNTER <= 5'd0;
 		SPI_CS <= 1'b1;
 	end
 	else
 	begin
-		if (READ)
+		if (!STATE)
 		begin
-			// Falling edge of OE
+			// Copy from flash to SRAM
 			
-			if (M68K_ADDR[17:4] == 14'b00111100101000)
+			if (COPY_TIMER == 6'd9)
 			begin
-				// "Read to trigger" SD card lock/unlock at $C1E500 or $C1E501 = 0, $C1E510 or $C1E511 = 1
-				// 11000001 11100101 000d000x
-				//      ### ######## ###----
-				if (!BUSY)
-					CARD_LOCK <= M68K_ADDR[3];
+				// Read even from flash
+				SRAM_DATA_REG[7:0] <= FL_DQ;
 			end
-			else if (M68K_ADDR[17:8] == 10'b0011110000)
+			else if (COPY_TIMER == 6'd10)
 			begin
-				// "Read to write" SD card SPI interface DATA OUT in $C1E000/$C1E001~$C1E1FE/$C1E1FF
-				// 11000001 1110000d dddddddx
-				//      ### #######
-				if (!BUSY)
+				// Go to odd address
+				COPY_FROM <= COPY_FROM + 1'b1;
+			end
+			else if (COPY_TIMER == 6'd19)
+			begin
+				// Read odd from flash
+				SRAM_DATA_REG[15:8] <= FL_DQ;
+			end
+			else if (COPY_TIMER == 6'd20)
+			begin
+				// Go to even address
+				COPY_FROM <= COPY_FROM + 1'b1;
+				// Start writing
+				SRAM_WE_N <= 1'b0;
+			end
+			else if (COPY_TIMER == 6'd29)
+			begin
+				// Stop writing
+				SRAM_WE_N <= 1'b1;
+			end
+			else if (COPY_TIMER == 6'd30)
+			begin
+				// Next word
+				if (COPY_TO == 18'h3FFFF)
+					STATE <= 1'b1;	// Ready to go !
+				else
+					COPY_TO <= COPY_TO + 1'b1;
+			end
+			
+			if (COPY_TIMER == 6'd32)
+				COPY_TIMER <= 6'd0;
+			else
+				COPY_TIMER <= COPY_TIMER + 1'b1;
+		end
+		else
+		begin
+			// Run !
+			//if (READ)
+			//begin
+				// Falling edge of OE
+				
+				if (M68K_ADDR[17:4] == 14'b00111100101000)
 				begin
-					// We're idle, start byte send
-					if (!CARD_LOCK)
+					// "Read to trigger" SD card lock/unlock at $C1E500 or $C1E501 = 0, $C1E510 or $C1E511 = 1
+					// 11000001 11100101 000d000x
+					//      ### ######## ###----
+					if (!BUSY)
+						CARD_LOCK <= M68K_ADDR[3];
+				end
+				else if (M68K_ADDR[17:8] == 10'b0011110000)
+				begin
+					// "Read to write" SD card SPI interface DATA OUT in $C1E000/$C1E001~$C1E1FE/$C1E1FF
+					// 11000001 1110000d dddddddx
+					//      ### #######
+					if (!BUSY)
 					begin
-						SPI_OUT <= M68K_ADDR[7:0];
-						STEP_COUNTER <= 5'd16;
-						CLK_DIV <= 5'd0;
+						// We're idle, start byte send
+						if (!CARD_LOCK)
+						begin
+							SPI_OUT <= M68K_ADDR[7:0];
+							STEP_COUNTER <= 5'd16;
+							CLK_DIV <= 5'd0;
+						end
+					end
+				end
+				else if (M68K_ADDR[17:4] == 14'b00111100011000)
+				begin
+					// "Read to set" SD card SPI CS state at $C1E300 or $C1E301 = 0, $C1E310 or $C1E311 = 1
+					// 11000001 11100011 000d000x
+					//      ### ######## ###----
+					SPI_CS <= M68K_ADDR[3];
+				end
+				else if (M68K_ADDR[17:4] == 14'b00111100100000)
+				begin
+					// "Read to set" SD card SPI speed at $C1E400 or $C1E401 = 0, $C1E410 or $C1E411 = 1
+					// 11000001 11100100 000d000x
+					//      ### ######## ###----
+					HIGH_SPEED <= M68K_ADDR[3];
+				end
+			/*end
+			else
+			begin
+				if (READ_TIMER)
+				begin
+					READ_TIMER <= READ_TIMER - 1'b1;
+					
+					if (READ_TIMER == 8'd4)			// 4!
+					begin
+						CPU_DATA_LOW <= FL_DQ;
+						LSB <= 1'b1;
+					end
+					else if (READ_TIMER == 8'd3)	// 3 !
+						CPU_DATA_HIGH <= FL_DQ;
+				end
+				else
+					LSB <= 1'b0;
+			end*/
+			
+			//PREV_OE <= nSYSROM_OE;
+			//PREV_PREV_OE <= PREV_OE;
+			
+			// SD card work
+			if (CLK_DIV < CLK_DIV_MAX)
+				CLK_DIV <= CLK_DIV + 1'b1;
+			else
+			begin
+				CLK_DIV <= 5'd0;
+				if (STEP_COUNTER)
+				begin
+					STEP_COUNTER <= STEP_COUNTER - 1'b1;
+					if (STEP_COUNTER[0])
+					begin
+						SPI_OUT <= {SPI_OUT[6:0], 1'b0};		// Shift left
+						SPI_IN <= {SPI_IN[6:0], SPI_MISO};	// Shift left
 					end
 				end
 			end
-			else if (M68K_ADDR[17:4] == 14'b00111100011000)
-			begin
-				// "Read to set" SD card SPI CS state at $C1E300 or $C1E301 = 0, $C1E310 or $C1E311 = 1
-				// 11000001 11100011 000d000x
-				//      ### ######## ###----
-				SPI_CS <= M68K_ADDR[3];
-			end
-			else if (M68K_ADDR[17:4] == 14'b00111100100000)
-			begin
-				// "Read to set" SD card SPI speed at $C1E400 or $C1E401 = 0, $C1E410 or $C1E411 = 1
-				// 11000001 11100100 000d000x
-				//      ### ######## ###----
-				HIGH_SPEED <= M68K_ADDR[3];
-			end
-			else
-			begin
-				// Normal flash read
-				LSB <= 1'b0;
-				READ_TIMER <= 8'd8;
-			end
 		end
-		else
-		begin
-			if (READ_TIMER)
-			begin
-				READ_TIMER <= READ_TIMER - 1'b1;
-				
-				if (READ_TIMER == 8'd4)			// 4!
-				begin
-					CPU_DATA_LOW <= FL_DQ;
-					LSB <= 1'b1;
-				end
-				else if (READ_TIMER == 8'd3)	// 3 !
-					CPU_DATA_HIGH <= FL_DQ;
-			end
-			else
-				LSB <= 1'b0;
-		end
-		
-		PREV_OE <= nSYSROM_OE;
-		PREV_PREV_OE <= PREV_OE;
-		
-		// SD card work
-		if (CLK_DIV < CLK_DIV_MAX)
-			CLK_DIV <= CLK_DIV + 1'b1;
-		else
-		begin
-			CLK_DIV <= 5'd0;
-			if (STEP_COUNTER)
-			begin
-				STEP_COUNTER <= STEP_COUNTER - 1'b1;
-				if (STEP_COUNTER[0])
-				begin
-					SPI_OUT <= {SPI_OUT[6:0], 1'b0};		// Shift left
-					SPI_IN <= {SPI_IN[6:0], SPI_MISO};	// Shift left
-				end
-			end
-		end
-		
 	end
 end
 
