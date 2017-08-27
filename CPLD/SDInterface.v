@@ -110,15 +110,15 @@ assign M68K_ADDR = {	GPIO_0_I3[21], GPIO_0_I3[30:29], GPIO_0_I3[27:22], GPIO_0_I
 
 assign nSYSROM_OE = GPIO_0_I1[9];
 
-// $C04800 or $C04801
-// 11000000 01001000 0000000x
+// $C1E800 or $C1E801
+// 11000001 11101000 0000000x
 //      ### ######## #######
-assign READ_SPI_BYTE = (M68K_ADDR[17:0] == 18'b000010010000000000) ? 1'b1 : 1'b0;
+assign READ_SPI_BYTE = (M68K_ADDR[17:0] == 18'b001111010000000000) ? 1'b1 : 1'b0;
 
-// $C04900 or $C04901
-// 11000000 01001001 0000000x
+// $C1E600 or $C1E601
+// 11000001 11100110 0000000x
 //      ### ######## #######
-assign READ_SPI_STATUS = (M68K_ADDR[17:0] == 18'b000010010010000000) ? 1'b1 : 1'b0;
+assign READ_SPI_STATUS = (M68K_ADDR[17:0] == 18'b001111001100000000) ? 1'b1 : 1'b0;
 
 assign {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO2[15],
 			GPIO_0_IO2[20], GPIO_0_IO2[18], GPIO_0_IO2[13], GPIO_0_IO2[11],
@@ -175,26 +175,19 @@ begin
 		begin
 			// Falling edge of OE
 			
-			if (M68K_ADDR[17:0] == 18'b000010001100101001)
+			if (M68K_ADDR[17:4] == 14'b00111100101000)
 			begin
-				// "Read to trigger" SD card lock at $C04652 or $C04653
-				// 11000000 01000110 0101001x
-				//      ### ######## #######
-				if (!BUSY) CARD_LOCK <= 1'b1;		// Lock
+				// "Read to trigger" SD card lock/unlock at $C1E500 or $C1E501 = 0, $C1E510 or $C1E511 = 1
+				// 11000001 11100101 000d000x
+				//      ### ######## ###----
+				if (!BUSY)
+					CARD_LOCK <= M68K_ADDR[3];
 			end
-			else if (M68K_ADDR[17:0] == 18'b000010001101010000)
+			else if (M68K_ADDR[17:8] == 10'b0011110000)
 			begin
-				// "Read to trigger" SD card unlock at $C046A0 or $C046A1
-				// 11000000 01000110 1010000x
-				//      ### ######## #######
-				if (!BUSY) CARD_LOCK <= 1'b0;		// Unlock
-			end
-			else if (M68K_ADDR[17:8] == 10'b0000100010)
-			begin
-				// "Read to write" SD card interface in $C04400/$C04401~$C045FE/$C045FF
-				// 11000000 0100010d dddddddx
+				// "Read to write" SD card SPI interface DATA OUT in $C1E000/$C1E001~$C1E1FE/$C1E1FF
+				// 11000001 1110000d dddddddx
 				//      ### #######
-			
 				if (!BUSY)
 				begin
 					// We're idle, start byte send
@@ -206,17 +199,17 @@ begin
 					end
 				end
 			end
-			else if (M68K_ADDR[17:4] == 14'b00001000110000)
+			else if (M68K_ADDR[17:4] == 14'b00111100011000)
 			begin
-				// "Read to set" SD card SPI CS state at $C04600 or $C04601 = 0, $C04610 or $C04611 = 1
-				// 11000000 01000110 000d000x
+				// "Read to set" SD card SPI CS state at $C1E300 or $C1E301 = 0, $C1E310 or $C1E311 = 1
+				// 11000001 11100011 000d000x
 				//      ### ######## ###----
 				SPI_CS <= M68K_ADDR[3];
 			end
-			else if (M68K_ADDR[17:4] == 14'b00001000111000)
+			else if (M68K_ADDR[17:4] == 14'b00111100100000)
 			begin
-				// "Read to set" SD card SPI speed at $C04700 or $C04701 = 0, $C04710 or $C04711 = 1
-				// 11000000 01000111 000d000x
+				// "Read to set" SD card SPI speed at $C1E400 or $C1E401 = 0, $C1E410 or $C1E411 = 1
+				// 11000001 11100100 000d000x
 				//      ### ######## ###----
 				HIGH_SPEED <= M68K_ADDR[3];
 			end

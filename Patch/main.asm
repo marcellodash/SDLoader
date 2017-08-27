@@ -2,6 +2,8 @@
     supmode on
     INCLUDE "regdefs.asm"
 
+    INCLUDE "vectors.asm"
+
 	INCLUDE "splash.asm"
 
 FixValueList	equ		$10E000	; OK ?
@@ -13,15 +15,37 @@ SDSectorCount	equ		$10E110	; Longword
 
 FixWriteConfig	equ		$10E120 ; Word
 
+PCERROR			equ		$10E200	; Longword
+
+; HW registers:
+SDREG_DOUTBASE	equ		$C1E000
+SDREG_CSLOW		equ		$C1E300
+SDREG_CSHIGH	equ		$C1E310
+SDREG_LOWSPEED	equ		$C1E400
+SDREG_HIGHSPEED	equ		$C1E410
+SDREG_UNLOCK	equ		$C1E500
+SDREG_LOCK		equ		$C1E510
+SDREG_STATUS	equ		$C1E600
+SDREG_DIN		equ		$C1E800
+
+
+    ORG $C0C360
+	nop							; Disable lid check and CD track operations in vblank handler
+	nop
+	nop
+	nop
 
     ORG $C0C854
 	jmp     PUPPETStuff			; Called at startup
 
 	ORG $C0E712
 	jmp     DrawProgressAnimation	; Don't draw loading progress animation
-	
+
+	;ORG $C0E8BE
+	;nop							; Auto push start, to start the game directly
+
 	ORG $C0E8D2
-	bra     $C0E968
+	bra     $C0E968				; Skip CD player interface updating
 
 	ORG $C0EB96
 	nop                         ; Disable CD mech detection in CheckCDValid
@@ -55,7 +79,7 @@ FixWriteConfig	equ		$10E120 ; Word
 	bra     $C0EC3A				; Skip first sector loading wait, there's no more CD :)
 
 	ORG $C0EDA2
-	bra     $C0EE00             ; Same
+	bra     $C0EE00             ; Prevent loading custom loading screens
 
 	ORG $C0EE04
 	nop							; Bypass CD lid check
@@ -77,7 +101,7 @@ FixWriteConfig	equ		$10E120 ; Word
 	ORG $C0F0AE					; Disable waiting for CD to stop after game load
 	nop
 	nop
-	
+
 	ORG $C0F4E8					; Disable waiting for CD to stop after BIOSF_LOADFILE
 	nop
 	nop
@@ -176,13 +200,13 @@ BCDtoHex:
 
 CDCheckDone:
 	;lea     $1113C2,a1			; "CDSectorBuffer" + 0x1BE (first partition entry)
-	tst.b   $10F656				; "CDValidFlag"
+	btst   	#7,$10F656			; "CDValidFlag"
 	bne     .valid
 	lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
 	bra     DumpMemory
 .valid:
 	clr.b   $10F6B6				; Original code "CDLoadBusy"
-	bclr    #0,$10F656          ; Original code "CDValidFlag"
+	bclr    #0,$7656(a5)		; Original code "CDValidFlag"
 	jmp     $C0EE4E				; Return to original code
 
 
@@ -270,9 +294,10 @@ LoadFromCD:
 	move.b  d0,REG_DIPSW
 
     movem.l (sp)+,d0-d7/a0-a6
-	
+
 	rts
 
+    INCLUDE "exceptions.asm"
 	INCLUDE "print.asm"
 	INCLUDE "sdcard.asm"
 	INCLUDE "fat32.asm"

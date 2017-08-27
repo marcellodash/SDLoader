@@ -47,6 +47,44 @@
 ;	Root directory + (clusternumber - 3) * BYTESPERSECTOR * SECTORSPERCLUSTER (always -3 ?)
 ;	= $400000 + 1 * $0200 * $08 = $401000
 
+LoadSDSector:
+	move.w  #$00FF,d0			; CS low, high DEBUG!!! speed, data all ones
+	move.b  d0,REG_DIPSW
+
+	movea.l #SDREG_HIGHSPEED,a0
+	btst.l  #8,d0
+    beq     .fast
+	movea.l #SDREG_LOWSPEED,a0
+.fast:
+    move.w  (a0),d4
+
+	movea.l #SDREG_CSHIGH,a0
+	btst.l  #9,d0
+    bne     .cs_high
+	movea.l #SDREG_CSLOW,a0
+.cs_high:
+    move.w  (a0),d4
+
+	movea.l #SDREG_DOUTBASE,a0
+	lsl.w   #1,d0
+	andi.l  #$1FE,d0
+	adda.l  d0,a0
+
+	move.w  #512,d6 			; Read SD sector
+.readsector:
+    move.w  (a0),d4
+	move.b  d0,REG_DIPSW
+	nop
+	move.b  SDREG_DIN,d0
+	nop
+	move.b  d0,(a1)+
+	nop
+	subq.w  #1,d6
+	nop
+	bne     .readsector
+	rts
+
+
 LoadCDSectorFromSD:
     movem.l d0-d7/a0-a6,-(sp)
 	move.b  d0,REG_DIPSW
@@ -61,7 +99,7 @@ LoadCDSectorFromSD:
 	tst.b   d0
 	beq     .cmdreadok
 	moveq.l #6,d0				; Error step 6: CMD17 wasn't accepted
-	jmp		Error
+	jmp		ErrSD
 .cmdreadok:
 
 	move.b  d0,REG_DIPSW		; Wait for data token
@@ -74,16 +112,17 @@ LoadCDSectorFromSD:
 	subq.b  #1,d6
 	bne     .try
 	moveq.l #7,d0				; Error step 7: Didn't get the data token in time
-	jmp		Error
+	jmp		ErrSD
 .gottoken:
 
-	move.w  #512,d6
-.readonesector:
-	move.w  #$00FF,d0			; CS low, high DEBUG!!! speed, data all ones
-	jsr     PutByteSPI
-	move.b  d0,(a1)+
-	subq.w  #1,d6
-	bne     .readonesector
+	;move.w  #512,d6 			; Read SD sector
+;.readonesector:
+	;move.w  #$00FF,d0			; CS low, high DEBUG!!! speed, data all ones
+	jsr     LoadSDSector
+
+	;move.b  d0,(a1)+
+	;subq.w  #1,d6
+	;bne     .readonesector
 
 	move.w  #$00FF,d0			; Discard CRC
 	jsr     PutByteSPI
@@ -97,19 +136,19 @@ LoadCDSectorFromSD:
 	addi.l  #512,SDLoadStart
 
     lea     FixValueList,a0
-	move.l  SDLoadStart,(a0)
-    lea     FixStrSDAddr,a0
+	move.l  SDLoadStart,(a0)+
+	move.l  d7,(a0)+
+    lea     FixStrCurAddr,a0
 	move.w  #FIXMAP+12+(6*32),d0
-	jsr     WriteFix            ; Display absolute address of loading start in SD card
+	jsr     WriteFix            ; Display absolute address of loading start in SD card and Subsector (3~0)
 
-    lea     FixValueList,a0
-	move.l  d7,(a0)
-    lea     FixStrSubSecCnt,a0
-	move.w  #FIXMAP+13+(6*32),d0
-	jsr     WriteFix            ; Show that we've succefully loaded a new sector
+	;Does NOT crash if unconditional loop is here
+	;Crashes randomly if D7==2 loop is here
 
 	tst.l   d7
 	bne     .readsectors
+
+	;Crashes if loop is here
 	
     subq.w  #1,CDSectorCount
 	move.w  CDSectorCount,$10F688

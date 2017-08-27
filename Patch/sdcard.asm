@@ -31,14 +31,7 @@
 ;12MHz / 32 = 375kHz for slow SPI ?
 ;Is 12MHz safe for fast SPI ?
 ;
-; "Writes" are done by reading at specific addresses:
-; Lock: $C04652 or $C04653
-; Unlock: $C046A0 or $C046A1
-; Write byte: $C04400~$C04401 to $C045FE~$C045FF (shift left once)
-; Read byte: $C04800 or $C04801
-; CS: $C04600 or $C04601 for 0, $C04610 or $C04611 for 1
-; Speed:  $C04700 or $C04701 for SLOW, $C04710 or $C04711 for FAST
-; Status: Read $C04900 or $C04901
+; "Writes" are done by reading at specific addresses
 
 InitSD:
 	jsr     UnlockSD
@@ -62,7 +55,7 @@ InitSD:
 	subq.b  #1,d7
 	bne     .cmd0
 	moveq.l #1,d0				; Error step 1: CMD0 failed
-	jmp		Error
+	jmp		ErrSD
 .ok0:
 
 	move.w  #$0137,d0			; CS low, low speed, CMD55
@@ -96,7 +89,7 @@ InitSD:
 	subq.b  #1,d7
 	bne     .init
 	moveq.l #2,d0				; Error step 2: Init failed
-	jmp		Error
+	jmp		ErrSD
 .initok:
 
 	move.w  #$010D,d0			; CS low, low speed, CMD13
@@ -105,7 +98,7 @@ InitSD:
 	tst.w   d0
 	beq     .statok
 	moveq.l #3,d0				; Error step 3: Wrong card status
-	jmp		Error
+	jmp		ErrSD
 .statok:
 
 	move.w  #$0110,d0			; CS low, low speed, CMD16
@@ -115,7 +108,7 @@ InitSD:
 	tst.b   d0
 	beq     .blocklenok
 	moveq.l #4,d0				; Error step 4: Can't set block length
-	jmp		Error
+	jmp		ErrSD
 .blocklenok:
 
 	; We can go full speed now
@@ -208,21 +201,21 @@ SDCommand:
 PutByteSPI:
 	move.b  d0,REG_DIPSW
 
-	movea.l #$C04710,a0
+	movea.l #SDREG_HIGHSPEED,a0
 	btst.l  #8,d0
     beq     .fast
-	movea.l #$C04700,a0
+	movea.l #SDREG_LOWSPEED,a0
 .fast:
     move.w  (a0),d4
-    
-	movea.l #$C04610,a0
+
+	movea.l #SDREG_CSHIGH,a0
 	btst.l  #9,d0
     bne     .cs_high
-	movea.l #$C04600,a0
+	movea.l #SDREG_CSLOW,a0
 .cs_high:
     move.w  (a0),d4
 
-	movea.l #$C04400,a0
+	movea.l #SDREG_DOUTBASE,a0
 	lsl.w   #1,d0
 	andi.l  #$1FE,d0
 	adda.l  d0,a0
@@ -232,19 +225,19 @@ PutByteSPI:
 .wait:
 	move.b  d0,REG_DIPSW
 	nop
-	move.w  $C04900,d0
+	move.w  SDREG_STATUS,d0
 	btst.l  #0,d0
 	beq     .done
 	subq.l  #1,d4
 	bne     .wait
 	moveq.l #9,d0				; Error 9: SPI timeout
-	jmp		Error
+	jmp		ErrSD
 .done:
 
-	move.b  $C04800,d0
+	move.b  SDREG_DIN,d0
 	rts
 
-Error:
+ErrSD:
 	lea     PALETTES,a0			; Set up palettes for text
 	move.w  #BLACK,(a0)+
 	move.w  #WHITE,(a0)+
@@ -270,9 +263,9 @@ FixStrSDError:
     dc.b    "SD CARD ERR ",$F0,0
 
 LockSD:
-    move.w  $C04652,d0
+    move.w  SDREG_LOCK,d0
 	rts
 
 UnlockSD:
-    move.w  $C046A0,d0
+    move.w  SDREG_UNLOCK,d0
     rts
