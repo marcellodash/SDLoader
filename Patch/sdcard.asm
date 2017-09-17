@@ -69,7 +69,7 @@ InitSD:
 	move.b  #1,d5				; SDC card !
 .mmc:
 
-    move.b  #50,d7				; Max tries
+    move.b  #200,d7				; Max tries
 .init:
 	jsr     Delay
 	tst.b   d5
@@ -166,7 +166,7 @@ GetR2:
 
 SDCommand:
     move.w  d0,d1
-	move.w  #$01FF,d0			; Just clock pulses
+	move.w  #$01FF,d0           ; Just clock pulses with CS low
 	jsr     PutByteSPI
     move.w  d1,d0
 
@@ -189,10 +189,10 @@ SDCommand:
 	move.w  #$01FF,d0			; Ignored CRC
 	tst.b   d1
 	bne     .not_cmd0
-	move.w  #$0195,d0			; CMD0's CRC
+	move.w  #$0195,d0			; CMD0's CRC (slow)
 .not_cmd0:
 	jsr     PutByteSPI
-	
+
 	move.w  #$01FF,d0			; Just clock pulses
 	jsr     PutByteSPI
 	rts
@@ -201,40 +201,41 @@ SDCommand:
 PutByteSPI:
 	move.b  d0,REG_DIPSW
 
-	movea.l #SDREG_HIGHSPEED,a0
-	btst.l  #8,d0
-    beq     .fast
+	movea.l #SDREG_HIGHSPEED,a0		; 12
+	btst.l  #8,d0                   ; 10
+    bne     .fast                   ; 10/8
 	movea.l #SDREG_LOWSPEED,a0
 .fast:
-    move.w  (a0),d4
+    move.w  (a0),d4                 ; 8
 
-	movea.l #SDREG_CSHIGH,a0
-	btst.l  #9,d0
-    bne     .cs_high
+	movea.l #SDREG_CSHIGH,a0		; 12
+	btst.l  #9,d0                   ; 10
+    bne     .cs_high             	; 10/8
 	movea.l #SDREG_CSLOW,a0
 .cs_high:
-    move.w  (a0),d4
+    move.w  (a0),d4                 ; 8
 
-	movea.l #SDREG_DOUTBASE,a0
-	lsl.w   #1,d0
-	andi.l  #$1FE,d0
-	adda.l  d0,a0
-    move.w  (a0),d4
+	movea.l #SDREG_DOUTBASE,a0		; 12
+	add.w   d0,d0                   ; 4
+	andi.l  #$1FE,d0                ; 16
+	adda.l  d0,a0                   ; 8
+    move.w  (a0),d4                 ; 8
 
-	move.l  #$1FFFF,d4
+	; Wait for interface not busy
+	move.w  #$FFFF,d4				; 8
 .wait:
-	move.b  d0,REG_DIPSW
-	nop
-	move.w  SDREG_STATUS,d0
-	btst.l  #0,d0
-	beq     .done
-	subq.l  #1,d4
-	bne     .wait
+	move.w  SDREG_STATUS,d0         ; 8
+	btst.l  #0,d0                   ; 10
+	beq     .done                   ; 10/8
+	move.b  d0,REG_DIPSW            ; 16
+	nop                             ; 4
+	subq.w  #1,d4                   ; 4
+	bne     .wait                   ; 10/8
 	moveq.l #9,d0				; Error 9: SPI timeout
 	jmp		ErrSD
 .done:
 
-	move.b  SDREG_DIN,d0
+	move.b  SDREG_DIN,d0            ; 8
 	rts
 
 ErrSD:
@@ -244,7 +245,7 @@ ErrSD:
 	move.w  #BLACK,(a0)
 
 	jsr     ClearFix
-	
+
 	move.b  #1,REG_ENVIDEO
 	move.b  #0,REG_DISBLSPR
 	move.b  #0,REG_DISBLFIX

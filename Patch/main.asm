@@ -6,6 +6,11 @@
     INCLUDE "vectors.asm"
 
 	INCLUDE "splash.asm"
+	
+	; Current status: loads fast, data seems to be good, AOF3 doesn't start :( Sometimes stuck in a loop in game code
+	; zone, sometimes resets.
+	
+	; SD card read optimization idea: do word reads instead of bytes ? Read 2 bytes from SD, put word on 68k bus.
 
 	; The IPL loading for TEST.ISO (Art of Fighting 3) is 13 files = 1909814 bytes
 	; Current time taken: 1909814 bytes / 10.08s = 189527 bytes / s = 185kbytes/s (23% gain from 1x CD speed)
@@ -16,7 +21,19 @@
 	;		Read setup for 512 bytes: 0.581ms                           38% :(
 	;	CD sector processing time: 1.764ms							20% :(
 
+	; Scope for PRG files with multiple read, stopped each CD sector: 7.38ms for 2048 bytes (1 CD sector): 271kbytes/s
+	; Current time taken: 1909814 bytes / 8.74s = 218462 bytes / s = 213kbytes/s (42% gain from 1x CD speed)
+
+	; Multiple read stopped each new file:
+	; Current time taken: 1909814 bytes / 7.51s = 254404 bytes / s = 248kbytes/s (65% gain from 1x CD speed)
+
+	; Multiple read stopped each new file, byte-to-word copy optimization:
+	; Current time taken: 1909814 bytes / 6.94s = 275178 bytes / s = 268kbytes/s (79% gain from 1x CD speed)
+
 	; Patches ---------------------------
+
+	ORG $C0BF5E
+	jmp     CopyBytesToWordCPULoop	; Patch, speed optimization attempt
 
     ORG $C0C854
 	jmp     PUPPETStuff			; Insertion - Called at startup
@@ -282,8 +299,59 @@ LoadFromCD:
 	move.w  #FIXMAP+10+(6*32),d0
 	jsr     WriteFix            ; Display total number of SD sectors to load
 	move.b  d0,REG_DIPSW
+	
+	; Stop eventual previous multiple-read
+	move.w  #$000C,d0			; CS low, high speed, CMD12
+	moveq.l #0,d2
+	jsr     SDCommand
+	moveq.l #200,d6				; Max tries
+.trystop:
+	move.b  d0,REG_DIPSW
+	move.w  #$00FF,d0			; CS low, high speed, data all ones
+	jsr     PutByteSPI
+	cmp.b   #$FF,d0
+	beq     .notbusy
+	subq.b  #1,d6
+	bne     .trystop
+	moveq.l #8,d0				; Error step 8: CMD12 failed
+	jmp		ErrSD
+.notbusy:
+
+	; Start new multiple-read
+	move.w  #$0012,d0			; CS low, high speed, CMD18 (18 = $12)
+	move.l  SDLoadStart,d2
+	jsr     SDCommand
+	jsr     GetR1
+	tst.b   d0
+	beq     .cmdreadok
+	moveq.l #6,d0				; Error step 6: CMD18 wasn't accepted
+	jmp		ErrSD
+.cmdreadok:
 
     movem.l (sp)+,d0-d7/a0-a6
+
+	rts
+	
+; TODO: Check first if the copy size is a multiple of 8 !
+CopyBytesToWordCPULoop:
+	move.b  (a0)+,d0
+    move.w  d0,(a1)+
+	move.b  (a0)+,d0
+	move.w  d0,(a1)+
+	move.b  (a0)+,d0
+    move.w  d0,(a1)+
+	move.b  (a0)+,d0
+	move.w  d0,(a1)+
+	move.b  (a0)+,d0
+    move.w  d0,(a1)+
+	move.b  (a0)+,d0
+	move.w  d0,(a1)+
+	move.b  (a0)+,d0
+    move.w  d0,(a1)+
+	move.b  (a0)+,d0
+	move.w  d0,(a1)+
+	subq.l  #8,d7
+	bne.s   CopyBytesToWordCPULoop
 
 	rts
 

@@ -101,7 +101,7 @@ LoadSDSector:
 	;nop
 	subq.w  #1,d6
 	bne     .readsector
-	rts       
+	rts
 
 
 LoadCDSectorFromSD:
@@ -113,18 +113,8 @@ LoadCDSectorFromSD:
 
 .readsectors:
 
-	move.w  #$0011,d0			; CS low, high speed, CMD17 (17 = $11)
-	move.l  SDLoadStart,d2
-	jsr     SDCommand
-	jsr     GetR1
-	tst.b   d0
-	beq     .cmdreadok
-	moveq.l #6,d0				; Error step 6: CMD17 wasn't accepted
-	jmp		ErrSD
-.cmdreadok:
-
 	; Wait for data token
-	moveq.l #100,d6				; Max tries
+	moveq.l #200,d6				; Max tries
 .try:
 	move.b  d0,REG_DIPSW
 	move.w  #$00FF,d0			; CS low, high speed, data all ones
@@ -137,14 +127,7 @@ LoadCDSectorFromSD:
 	jmp		ErrSD
 .gottoken:
 
-	;move.w  #512,d6 			; Read SD sector
-;.readonesector:
-	;move.w  #$00FF,d0			; CS low, high speed, data all ones
 	jsr     LoadSDSector
-
-	;move.b  d0,(a1)+
-	;subq.w  #1,d6
-	;bne     .readonesector
 
 	move.w  #$00FF,d0			; Discard CRC
 	jsr     PutByteSPI
