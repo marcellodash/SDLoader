@@ -14,7 +14,7 @@ FixStrSDAddr:
 FixStrSDSecCnt:
 	dc.b "SD SECTORS  ",$F0,0
 FixStrCurAddr:
-	dc.b "CUR ADDRESS ",$F0," ",$F1,0
+	dc.b "CUR ADDRESS ",$F0,0
 
 FixStrClear:
     dc.b "            ",0

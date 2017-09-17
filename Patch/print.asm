@@ -53,6 +53,19 @@ WriteFix:
 	bne     .writelong
     bra     .write
     
+    
+ClearFix:
+	move.w  #$7000,REG_VRAMADDR
+	nop
+	move.w  #1,REG_VRAMMOD
+	move.l  #32*40,d7
+.clear:
+    move.w  #$0020,REG_VRAMRW
+	move.b  d0,REG_DIPSW
+	subq.l  #1,d7
+	bne     .clear
+	rts
+    
 
 DumpMemory:
 	move.b  d0,REG_DIPSW
@@ -60,6 +73,8 @@ DumpMemory:
 	move.w  #BLACK,(a0)+
 	move.w  #WHITE,(a0)+
 	move.w  #BLACK,(a0)
+
+	jsr     ClearFix
 	
 	move.b  #1,REG_ENVIDEO
 	move.b  #0,REG_DISBLSPR
@@ -69,8 +84,8 @@ DumpMemory:
     nop
     nop
     nop
-    move.w  #FIXMAP+12+(2*32),d0
-	move.l  #16,d7
+    move.w  #FIXMAP+4+(4*32),d0
+	move.l  #24,d7
 .writeblock:
 	move.w  d0,REG_VRAMADDR
 	moveq.l #0,d1
@@ -86,6 +101,7 @@ DumpMemory:
     addi.b  #7,d1
 .deci_a:
     addi.b  #$30,d1
+	or.w    FixWriteConfig,d1
 	move.w  d1,REG_VRAMRW
 	
 	move.b  d2,d1

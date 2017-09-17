@@ -72,7 +72,7 @@ InitSD:
     move.b  #50,d7				; Max tries
 .init:
 	jsr     Delay
-	tst.b   d1
+	tst.b   d5
 	beq     .mmc_init
 	move.w  #$0137,d0			; CS low, low speed, CMD55
 	jsr     SDCommand
@@ -242,6 +242,8 @@ ErrSD:
 	move.w  #BLACK,(a0)+
 	move.w  #WHITE,(a0)+
 	move.w  #BLACK,(a0)
+
+	jsr     ClearFix
 	
 	move.b  #1,REG_ENVIDEO
 	move.b  #0,REG_DISBLSPR

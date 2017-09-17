@@ -1,36 +1,43 @@
 ErrBus:
     move.l  10(a7),PCERROR      ; Store PC from stack frame
     movem.l d0-d7/a0-a6,-(a7)   ; Store registers
+    move.w  #GREEN,BACKDROP
     lea     FixStrErrBus,a0
     jmp     DispExc
 
 ErrAddr:
     move.l  10(a7),PCERROR      ; Store PC from stack frame
     movem.l d0-d7/a0-a6,-(a7)   ; Store registers
+    move.w  #BLUE,BACKDROP
     lea     FixStrErrAddr,a0
     jmp     DispExc
     
 ErrIllegal:
     move.l  2(a7),PCERROR       ; Store PC from stack frame
     movem.l d0-d7/a0-a6,-(a7)   ; Store registers
+    move.w  #YELLOW,BACKDROP
     lea     FixStrErrIllegal,a0
     jmp     DispExc
 
 ErrGeneric:
     move.l  2(a7),PCERROR       ; Store PC from stack frame
     movem.l d0-d7/a0-a6,-(a7)   ; Store registers
+    move.w  #MAGENTA,BACKDROP
     lea     FixStrErrGeneric,a0
     jmp     DispExc
 
 ErrUninit:
     move.l  2(a7),PCERROR       ; Store PC from stack frame
     movem.l d0-d7/a0-a6,-(a7)   ; Store registers
+    move.w  #CYAN,BACKDROP
     lea     FixStrErrUninit,a0
     jmp     DispExc
     
 
 DispExc:
 	ori.w   #$0700,sr
+	
+	move.w  #$3100,FixWriteConfig
 
 	move.w  #FIXMAP+8+(4*32),d0
 	jsr     WriteFix

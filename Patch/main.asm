@@ -1,55 +1,42 @@
     cpu 68000
     supmode on
     INCLUDE "regdefs.asm"
+	INCLUDE "equ.asm"
 
     INCLUDE "vectors.asm"
 
 	INCLUDE "splash.asm"
 
-FixValueList	equ		$10E000	; OK ?
-SDISOStart		equ		$10E100	; Longword
-ISOLoadStart	equ		$10E104 ; Longword
-SDLoadStart		equ		$10E108 ; Longword
-CDSectorCount	equ		$10E10C	; Word
-SDSectorCount	equ		$10E110	; Longword
+	; The IPL loading for TEST.ISO (Art of Fighting 3) is 13 files = 1909814 bytes
+	; Current time taken: 1909814 bytes / 10.08s = 189527 bytes / s = 185kbytes/s (23% gain from 1x CD speed)
+	; Scope for PRG files: 8.44ms for 2048 bytes (1 CD sector): 237kbytes/s
+	;	SD sectors read, 2048 bytes: 6.8ms							80%
+	;		One SD sector read, 512 bytes: 6.8/4=1.7ms
+	;		Actual burst read for 512 bytes: 1.008ms: 496kbytes/s		62%
+	;		Read setup for 512 bytes: 0.581ms                           38% :(
+	;	CD sector processing time: 1.764ms							20% :(
 
-FixWriteConfig	equ		$10E120 ; Word
-
-PCERROR			equ		$10E200	; Longword
-
-; HW registers:
-SDREG_DOUTBASE	equ		$C1E000
-SDREG_CSLOW		equ		$C1E300
-SDREG_CSHIGH	equ		$C1E310
-SDREG_LOWSPEED	equ		$C1E400
-SDREG_HIGHSPEED	equ		$C1E410
-SDREG_UNLOCK	equ		$C1E500
-SDREG_LOCK		equ		$C1E510
-SDREG_STATUS	equ		$C1E600
-SDREG_DIN		equ		$C1E800
-
-
-    ORG $C0C360
-	nop							; Disable lid check and CD track operations in vblank handler
-	nop
-	nop
-	nop
+	; Patches ---------------------------
 
     ORG $C0C854
-	jmp     PUPPETStuff			; Called at startup
+	jmp     PUPPETStuff			; Insertion - Called at startup
+
+    ORG $C0E8BC
+    dc.w $7DAC					; Easier to push start to load game (uses current button presses, not active)
 
 	ORG $C0E712
-	jmp     DrawProgressAnimation	; Don't draw loading progress animation
+	jmp     DrawProgressAnimation	; Insertion - Loading progress animation
 
 	;ORG $C0E8BE
-	;nop							; Auto push start, to start the game directly
+	;nop							; Auto push start, to start the game as soon as files are checked
 
 	ORG $C0E8D2
-	bra     $C0E968				; Skip CD player interface updating
+	;rts             			; Skip CD player interface updating
+	bra     $C0E968
 
 	ORG $C0EB96
 	nop                         ; Disable CD mech detection in CheckCDValid
-	nop
+	nop                         ; Overwrite up to movem.l ...
 	nop
 	nop
 	nop
@@ -69,27 +56,28 @@ SDREG_DIN		equ		$C1E800
 	nop							; Disable "WAIT A MOMENT" message (again)
 	nop
 
-	ORG $C0EBF8
-	nop							; Disable PUPPET CD mode activation
-	nop
+	ORG $C0EE58
+	rts							; Disable SetCDDMode as a whole
+	;nop						; Disable PUPPET CD mode activation
+	;nop
 
 	ORG $C0EC16
-	jsr     LoadCDSectorFromSD
+	jsr     LoadCDSectorFromSD	; Load first sector (CD001...)
 	move.b  d0,REG_DIPSW
 	bra     $C0EC3A				; Skip first sector loading wait, there's no more CD :)
 
 	ORG $C0EDA2
-	bra     $C0EE00             ; Prevent loading custom loading screens
+	bra     $C0EE00             ; Prevent loading LOGO files (custom loading screens)
 
 	ORG $C0EE04
 	nop							; Bypass CD lid check
 
     ORG $C0EE0C
-	jmp     CDCheckDone
+	jmp     CDCheckDone         ; Insertion - Used to trigger a memory dump in case the "CD" isn't validated
 
-	ORG $C0EF4C
+	ORG $C0EF4C                 ; "GetCDFileList"
 	tst.w   $10F688				; "SectorCounter"
-	beq     $C0EFD0				; rts
+	beq     $C0EFD0				; No more sectors to load: go to rts
 	jsr     LoadCDSectorFromSD
 	bra     $C0EF66
 
@@ -98,7 +86,7 @@ SDREG_DIN		equ		$C1E800
 	nop
 	nop
 
-	ORG $C0F0AE					; Disable waiting for CD to stop after game load
+	ORG $C0F0AE					; Disable waiting for CD to stop after IPL load
 	nop
 	nop
 
@@ -115,8 +103,8 @@ SDREG_DIN		equ		$C1E800
 	jmp     LoadFile			; Patch original LoadFile
 
 	ORG $C0FD78
-	jsr     LoadCDSectorFromSD
-	bra     $C0FD88
+	jsr     LoadCDSectorFromSD	; Load sector in SearchForFile
+	bra     $C0FD88				; Skip waiting
 
 	ORG $C0FFA2					; WaitForCD
 	jsr     LoadCDSectorFromSD
@@ -135,6 +123,7 @@ SDREG_DIN		equ		$C1E800
     jmp     LoadFromCD			; Patch original "LoadFromCD" (multiple calls)
 
 	ORG $C11774
+	;jsr     $C0B278			; Todo: Just jump to ClearSprites ?
 	lea     $100040,a6        	; Disable CD player display and erase finger cursor from splash screen
 	move.b  #0,4(a6)			; Sprite height
 	bra     $C16CF2				; "SpriteUpdateVRAM"
@@ -152,12 +141,12 @@ PUPPETStuff:
 	move.w  #7,(REG_IRQACK).l
 	andi.w  #$F8FF,sr
 	
-	move.w  #$0000,FixWriteConfig
+	move.w  #$0000,FixWriteConfig 	; Added
 
-	jsr     InitSD              ; Added
+	jsr     InitSD                  ; Added
 	rts
 
-	
+
 DrawProgressAnimation:
     lea     FixValueList,a0
     moveq.l #0,d0
@@ -225,7 +214,7 @@ LoadFromCD:
 
     lea     FixValueList,a0
 	move.l  $10F6C8,d0			; Retrieve requested MSF
-	lsr.l   #8,d0
+	lsr.l   #8,d0               ; Rightmost byte is unused
 	move.l  d0,(a0)
     lea     FixStrReqSec,a0
 	move.w  #FIXMAP+6+(6*32),d0
@@ -245,8 +234,8 @@ LoadFromCD:
 	move.b  (a0)+,d0			; F
 	jsr     BCDtoHex
 	add.l   d0,d3
-	subi.l  #150,d3				; Remove 2 second gap
-	lsl.l   #8,d3				; Absolute hex address (CD sector = 2048 bytes)
+	subi.l  #2*75,d3			; Remove 2 second gap
+	lsl.l   #8,d3				; Absolute hex address in ISO file (CD sector = 2048 bytes)
 	lsl.l   #3,d3
 	move.l  d3,ISOLoadStart
 	move.b  d0,REG_DIPSW
@@ -268,7 +257,8 @@ LoadFromCD:
 	jsr     WriteFix            ; Display number of sectors to load
 	move.b  d0,REG_DIPSW
 
-	move.l  #$411000,SDISOStart	; Hardcoded for now DEBUG (10000 Partition start + 401000 FAT end)
+	; Partition start is longword at 0x1C * sector size ? ex: 0x81*0x0200 = 10200
+	move.l  #$411200,SDISOStart	; Hardcoded for now DEBUG (10200 Partition start + 401000 FAT end)
 
 	move.l  SDISOStart,d0
 	add.l   ISOLoadStart,d0
@@ -283,14 +273,14 @@ LoadFromCD:
 
 	moveq.l #0,d0
 	move.w  CDSectorCount,d0
-	lsl.l   #2,d0
-	move.l  d0,SDSectorCount	; CD sector = 2048 bytes = 4 SD sectors = 4 * 512 bytes
+	;lsl.l   #2,d0
+	;move.l  d0,SDSectorCount	; CD sector = 2048 bytes = 4 SD sectors = 4 * 512 bytes
 
     lea     FixValueList,a0
 	move.l  d0,(a0)
     lea     FixStrSDSecCnt,a0
 	move.w  #FIXMAP+10+(6*32),d0
-	jsr     WriteFix            ; Display absolute address of loading start in SD card
+	jsr     WriteFix            ; Display total number of SD sectors to load
 	move.b  d0,REG_DIPSW
 
     movem.l (sp)+,d0-d7/a0-a6
