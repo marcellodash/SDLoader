@@ -51,3 +51,30 @@ FixStrARegsDump:
     dc.b "A5:",$F5,1,0,6
     dc.b "A6:",$F6,1,0,7
     dc.b "PC:",$F7,0
+
+ErrFixStrList:
+    dc.l FixStrInterfaceTimeout
+    dc.l FixStrCMD0Timeout
+    dc.l FixStrSDInitFailed
+    dc.l FixStrSDWrongStatus
+    dc.l FixStrCMD16Failed
+    dc.l FixStrDataTokenTimeout
+    dc.l FixStrStopReadFailed
+    dc.l FixStrStartReadFailed
+
+FixStrInterfaceTimeout:				; 0
+	dc.b "SPI interface timeout",0
+FixStrCMD0Timeout:					; 1
+	dc.b "CMD0 timeout",0
+FixStrSDInitFailed:					; 2
+	dc.b "SD init failed",0
+FixStrSDWrongStatus:                ; 3
+	dc.b "SD wrong status",0
+FixStrCMD16Failed:					; 4
+	dc.b "CMD16 filed",0
+FixStrDataTokenTimeout:				; 5
+	dc.b "Data token timeout",0
+FixStrStopReadFailed:				; 6
+	dc.b "Read stop failed",0
+FixStrStartReadFailed:				; 7
+	dc.b "Read start failed",0

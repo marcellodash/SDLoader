@@ -46,14 +46,17 @@
 ;	Root directory + (clusternumber - 3) * BYTESPERSECTOR * SECTORSPERCLUSTER (always -3 ?)
 ;	= $400000 + 1 * $0200 * $08 = $401000
 
+; Trashes D0, D4, D6, A0
+; Uses A1
 LoadSDSector:
 	move.b  d0,REG_DIPSW
 
-	move.w  #$00FF,d0			; CS low, high speed, data all ones
+	move.w  #$01FF,d0			; CS low, high speed, data all ones
 
+    ; SLOW! Only do once at multiple reads init ?
 	movea.l #SDREG_HIGHSPEED,a0	; Speed switch
 	btst.l  #8,d0
-    beq     .fast
+    bne     .fast
 	movea.l #SDREG_LOWSPEED,a0
 .fast:
     move.w  (a0),d4
@@ -69,46 +72,38 @@ LoadSDSector:
 	;lsl.w   #1,d0
 	;andi.l  #$1FE,d0
 	;adda.l  d0,a0
+	
+	lea     SDREG_DIN,a0
 
-	move.w  SDREG_INITBURST,d4	; d4 is throw-away
+	move.w  SDREG_INITBURST,d4	; Start burst read. d4 is throw-away
 
-	move.w  #64,d6 				; Read whole SD sector (512 bytes)
+	move.w  #512,d6 				; Read whole SD sector (512 bytes)
 .readsector:
-	move.b  d0,REG_DIPSW
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
-	;move.w  (a0),d4				; SPI "Write"
-	move.b  SDREG_DIN,(a1)+		; SPI read
-	;nop
+	move.b  (a0),(a1)+		; SPI read
+	nop
+	nop
+	nop
+	nop
+	;move.b  (a0),(a1)+		; SPI read
+	;move.b  (a0),(a1)+		; SPI read
+	;move.b  (a0),(a1)+		; SPI read
+	;move.b  (a0),(a1)+		; SPI read
+	;move.b  (a0),(a1)+		; SPI read
+	;move.b  (a0),(a1)+		; SPI read
+	;move.b  (a0),(a1)+		; SPI read
 	subq.w  #1,d6
 	bne     .readsector
+
+	move.b  d0,REG_DIPSW
 	rts
 
 
+; Trashes D0, D6, D7, A0, A1
 LoadCDSectorFromSD:
-    movem.l d0-d7/a0-a6,-(sp)
+    movem.l d0-d7/a0-a6,-(sp)	; SLOW!
 	move.b  d0,REG_DIPSW
 
-	moveq.l #4,d7
+	moveq.l #4,d7               ; 4 SD sectors = 1 CD sector
 	lea     $111204,a1			; "CDSectorBuffer"
 
 .readsectors:
@@ -117,24 +112,24 @@ LoadCDSectorFromSD:
 	moveq.l #200,d6				; Max tries
 .try:
 	move.b  d0,REG_DIPSW
-	move.w  #$00FF,d0			; CS low, high speed, data all ones
+	move.w  #$01FF,d0			; CS low, high speed, data all ones
 	jsr     PutByteSPI
 	cmp.b   #$FE,d0
 	beq     .gottoken
 	subq.b  #1,d6
 	bne     .try
-	moveq.l #7,d0				; Error step 7: Didn't get the data token in time
+	moveq.l #5,d0				; Didn't get the data token in time
 	jmp		ErrSD
 .gottoken:
 
 	jsr     LoadSDSector
 
-	move.w  #$00FF,d0			; Discard CRC
+	move.w  #$01FF,d0			; Discard CRC
 	jsr     PutByteSPI
-	move.w  #$00FF,d0
+	move.w  #$01FF,d0
 	jsr     PutByteSPI
 
-	move.w  #$0200,d0			; CS high
+	move.w  #$0300,d0			; CS high
 	jsr     PutByteSPI
 
 	addi.l  #512,SDLoadStart
@@ -151,12 +146,45 @@ LoadCDSectorFromSD:
 	jmp     DumpMemory
 .go_on:
 
-	lea     FixValueList,a0
+; DEBUG, compute checksum of CD sector which was just loaded
+	lea     $111204,a1			; "CDSectorBuffer"
+	moveq.l #0,d0
+	move.l  d0,d6
+	move.l  #2048,d7
+.do_checksum:
+	move.b  d0,REG_DIPSW
+	move.b  (a1)+,d6
+	add.w   d6,d0
+	subq.w  #1,d7
+	tst.w   d7
+	bne     .do_checksum
+
+	lea     debug_checksums,a1
+	moveq.l #0,d6
+	move.w  DebugChecksumIdx,d6
+	adda.l   d6,a1
+	adda.l   d6,a1
+	move.w  (a1),d6
+	cmp.w   d6,d0
+	beq     .chk_ok
+	move.b  d0,REG_DIPSW
+	nop
+	nop
+	nop
+	; TESTING
+	;lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
+	;jmp     DumpMemory
+.chk_ok:
+.not_prog:
+	move.b  d0,REG_DIPSW
+
+
+	lea     FixValueList,a0		; SLOW! Used only for debug
 	move.l  SDLoadStart,(a0)+
     lea     FixStrCurAddr,a0
 	move.w  #FIXMAP+12+(6*32),d0
 	jsr     WriteFix            ; Display absolute address of loading start in SD card and Subsector (3~0)
-	
+
 	; For original progressbar update:
 	move.b  d0,REG_DIPSW
 	move.l  $10F690,d0
@@ -169,6 +197,8 @@ LoadCDSectorFromSD:
 
     subq.w  #1,CDSectorCount
 	move.w  CDSectorCount,$10F688
+	
+	addq.w  #1,DebugChecksumIdx	; DEBUG
 
-    movem.l (sp)+,d0-d7/a0-a6
+    movem.l (sp)+,d0-d7/a0-a6	; SLOW!
     rts

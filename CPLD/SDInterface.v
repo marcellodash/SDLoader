@@ -1,8 +1,3 @@
-// Last news:
-// Things should work pretty nicely for the NeoGeo side
-// SDRAM controller needs debugging, seems to write only the first word when uploading from PC
-// Read back values are all the same (see Signaltap)
-
 module SDInterface(
 	input CLOCK_50,
 	
@@ -39,6 +34,7 @@ reg [8:0] BURST_COUNTER;
 reg PREV_OE;
 reg PREV_PREV_OE;
 reg [18:0] M68K_ADDR_REG;
+reg [18:0] M68K_DATA_REG /* synthesis noprune */ ;
 
 wire nRESET;
 wire SPI_BUSY;
@@ -47,6 +43,8 @@ wire READ_SPI_STATUS;
 wire [4:0] CLK_DIV_MAX;
 
 wire [17:0] M68K_ADDR;		// 256kWords = 512kBytes
+wire [15:0] DATA_OUT;
+wire [15:0] DATA_IN;
 wire nSYSROM_OE;
 wire nEEPROM_OE;
 
@@ -54,13 +52,25 @@ SEG7_LUT_4 U3(HEX0, HEX1, HEX2, HEX3, M68K_ADDR_REG[15:0]);
 
 assign M68K_ADDR = {GPIO_0_I3[21], GPIO_0_I3[30:29], GPIO_0_I3[27:22], GPIO_0_I1[0], GPIO_0_I1[1], GPIO_0_I1[2],
 							GPIO_0_I1[3], GPIO_0_I1[4], GPIO_0_I1[5], GPIO_0_I1[6], GPIO_0_I1[7], GPIO_0_I1[8]};
-							
+
+assign {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO2[15],
+			GPIO_0_IO2[20], GPIO_0_IO2[18], GPIO_0_IO2[13], GPIO_0_IO2[11],
+			GPIO_0_IO4[32], GPIO_0_IO4[34], GPIO_0_IO2[14], GPIO_0_IO2[16],
+			GPIO_0_IO2[19], GPIO_0_IO2[17], GPIO_0_IO2[12], GPIO_0_IO2[10]} = DATA_OUT;
+
+// DEBUG
+assign DATA_IN = {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO2[15],
+			GPIO_0_IO2[20], GPIO_0_IO2[18], GPIO_0_IO2[13], GPIO_0_IO2[11],
+			GPIO_0_IO4[32], GPIO_0_IO4[34], GPIO_0_IO2[14], GPIO_0_IO2[16],
+			GPIO_0_IO2[19], GPIO_0_IO2[17], GPIO_0_IO2[12], GPIO_0_IO2[10]};
+
 assign GPIO_0_I3[28] = nEEPROM_OE;
+assign nSYSROM_OE = GPIO_0_I1[9];
 
 assign GPIO_0_I3[30:29] = 2'bzz;
 assign GPIO_0_I3[27:21] = 7'bzzzzzzz;
 
-assign PS2_CLK = SPI_CLK;
+assign PS2_CLK = SPI_CLK;	// Debug output
 
 //A8 GPIO_0[0]
 //A7 GPIO_0[1]
@@ -71,7 +81,7 @@ assign PS2_CLK = SPI_CLK;
 //A2 GPIO_0[6]
 //A1 GPIO_0[7]
 //A0 GPIO_0[8]
-//OE GPIO_0[9]
+//Sysrom nOE in GPIO_0[9]
 //D0 GPIO_0[10]
 //D8 GPIO_0[11]
 //D1 GPIO_0[12]
@@ -90,7 +100,7 @@ assign PS2_CLK = SPI_CLK;
 //A12 GPIO_0[25]
 //A13 GPIO_0[26]
 //A14 GPIO_0[27]
-//Unused GPIO_0[28]
+//EEPROM nOE out GPIO_0[28]
 //A15 GPIO_0[29]
 //A16 GPIO_0[30]
 //D15 GPIO_0[31]
@@ -98,8 +108,6 @@ assign PS2_CLK = SPI_CLK;
 //D14 GPIO_0[33]
 //D6 GPIO_0[34]
 //D13 GPIO_0[35]
-
-assign nSYSROM_OE = GPIO_0_I1[9];
 
 // $C1E800 or $C1E801
 // 11000001 11101000 0000000x
@@ -110,13 +118,6 @@ assign READ_SPI_BYTE = (M68K_ADDR[17:0] == 18'b001111010000000000) ? 1'b1 : 1'b0
 // 11000001 11100110 0000000x
 //      ### ######## #######
 assign READ_SPI_STATUS = (M68K_ADDR[17:0] == 18'b001111001100000000) ? 1'b1 : 1'b0;
-
-wire [15:0] DATA_OUT;
-
-assign {GPIO_0_IO4[31], GPIO_0_IO4[33], GPIO_0_IO4[35], GPIO_0_IO2[15],
-			GPIO_0_IO2[20], GPIO_0_IO2[18], GPIO_0_IO2[13], GPIO_0_IO2[11],
-			GPIO_0_IO4[32], GPIO_0_IO4[34], GPIO_0_IO2[14], GPIO_0_IO2[16],
-			GPIO_0_IO2[19], GPIO_0_IO2[17], GPIO_0_IO2[12], GPIO_0_IO2[10]} = DATA_OUT;
 
 assign DATA_OUT = nSYSROM_OE ? 16'bzzzzzzzzzzzzzzzz :
 			READ_SPI_STATUS ? {7'b0000000, SPI_BUSY, 7'b0000000, SPI_BUSY} :
@@ -133,7 +134,7 @@ assign LEDG[5] = CARD_LOCK;
 assign LEDG[6] = SPI_BUSY;
 assign LEDG[7] = SW[0] | SW[1];
 
-assign CLK_DIV_MAX = HIGH_SPEED ? 5'd1 : 5'd30;		// Was 1 !
+assign CLK_DIV_MAX = HIGH_SPEED ? 5'd0 : 5'd30;		// SPI speed select
 assign SPI_MOSI = SPI_OUT[7];
 assign SPI_CLK = STEP_COUNTER[0];
 
@@ -145,14 +146,16 @@ always @(posedge CLOCK_50)
 begin
 	if (!nRESET)
 	begin
-		CARD_LOCK <= 1'b1;
+		CARD_LOCK <= 1'b1;		// Lock SD card access
 		STEP_COUNTER <= 5'd0;
-		SPI_CS <= 1'b1;
+		SPI_CS <= 1'b1;			// Deselect SD card
 		BURST_COUNTER <= 9'd0;
+		HIGH_SPEED <= 1'b0;		// Start in slow mode
 	end
 	else
 	begin
 		M68K_ADDR_REG <= {M68K_ADDR, 1'b0};
+		M68K_DATA_REG <= DATA_IN;
 		
 		if (READ)
 		begin
@@ -171,16 +174,16 @@ begin
 				// "Read to write" SD card SPI interface DATA OUT in $C1E000/$C1E001~$C1E1FE/$C1E1FF
 				// 11000001 1110000d dddddddx
 				//      ### #######
-				if (!SPI_BUSY)
-				begin
+				//if (!SPI_BUSY)			// Let the software check if SPI is busy or not !
+				//begin
 					// We're idle, start byte send
 					if (!CARD_LOCK)
 					begin
-						SPI_OUT <= M68K_ADDR[7:0];
+						SPI_OUT <= M68K_ADDR[7:0];		// Load data from address bus
 						STEP_COUNTER <= 5'd16;
 						CLK_DIV <= 5'd0;
 					end
-				end
+				//end
 			end
 			else if (M68K_ADDR[17:4] == 14'b00111100011000)
 			begin

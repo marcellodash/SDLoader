@@ -80,16 +80,18 @@ DumpMemory:
 	move.b  #0,REG_DISBLSPR
 	move.b  #0,REG_DISBLFIX
 
+	move.w  #$3100,FixWriteConfig
+
 	move.w  #32,REG_VRAMMOD
     nop
     nop
     nop
-    move.w  #FIXMAP+4+(4*32),d0
-	move.l  #24,d7
+    move.w  #FIXMAP+2+(2*32),d0
+	move.l  #26,d7
 .writeblock:
 	move.w  d0,REG_VRAMADDR
 	moveq.l #0,d1
-	move.l  #16,d6
+	move.l  #18,d6
 .writeline:
 	move.b  d0,REG_DIPSW
 	move.b  (a1)+,d2
@@ -125,4 +127,28 @@ DumpMemory:
 	nop
 	nop
 	nop
+
+	move.b  BIOS_P1CURRENT,d0	; A=0 B=512 C=512+512 D=512+512+512
+
+    cmp.b   #$10,d0
+    bne     .no_a
+	lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
+	bra     DumpMemory
+.no_a:
+    cmp.b   #$20,d0
+    bne     .no_b
+	lea     $111404,a1			; Dump memory starting from "CDSectorBuffer" and lock up
+	bra     DumpMemory
+.no_b:
+    cmp.b   #$40,d0
+    bne     .no_c
+	lea     $111604,a1			; Dump memory starting from "CDSectorBuffer" and lock up
+	bra     DumpMemory
+.no_c:
+    cmp.b   #$80,d0
+    bne     .no_d
+	lea     $111804,a1			; Dump memory starting from "CDSectorBuffer" and lock up
+	bra     DumpMemory
+.no_d:
+
     bra     .lockup

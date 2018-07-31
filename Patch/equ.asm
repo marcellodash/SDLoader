@@ -1,13 +1,14 @@
-FixValueList	equ		$10E000	; OK ?		List of values (max 7) used by WriteFix codes $F0+
-SDISOStart		equ		$10E100	; Longword
-ISOLoadStart	equ		$10E104 ; Longword
-SDLoadStart		equ		$10E108 ; Longword
-CDSectorCount	equ		$10E10C	; Word
-;SDSectorCount	equ		$10E110	; Longword
+FixValueList	equ		$10D000	; OK ?		List of values (max 7) used by WriteFix codes $F0+
+SDISOStart		equ		$10D100	; Longword
+ISOLoadStart	equ		$10D104 ; Longword
+SDLoadStart		equ		$10D108 ; Longword
+CDSectorCount	equ		$10D10C	; Word
+;SDSectorCount	equ		$10D110	; Longword
+DebugChecksumIdx equ	$10D120	; Word
 
-FixWriteConfig	equ		$10E120 ; Word		ORed with fix tilemap data to set fix text palette
+FixWriteConfig	equ		$10D120 ; Word		ORed with fix tilemap data to set fix text palette
 
-PCERROR			equ		$10E200	; Longword
+PCERROR			equ		$10D200	; Longword
 
 ; HW registers:
 SDREG_DOUTBASE	equ		$C1E000
