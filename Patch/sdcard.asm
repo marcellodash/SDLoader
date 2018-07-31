@@ -240,6 +240,36 @@ PutByteSPI:
 
 	move.b  SDREG_DIN,d0            ; 8
 	rts
+	
+	
+PutByteSPIFast:
+	move.b  d0,REG_DIPSW
+
+    move.w  SDREG_CSLOW,d4
+
+	movea.l #SDREG_DOUTBASE,a0		; 12
+	add.w   d0,d0                   ; 4
+	andi.w  #$1FE,d0                ; TESTING: Was .l Seems ok
+	adda.w  d0,a0                   ; TESTING: Was .l Seems ok
+    move.w  (a0),d4                 ; 8
+
+	; Wait for interface not busy
+	move.w  #$FFFF,d4				; 8
+.wait:
+	move.w  SDREG_STATUS,d0         ; 8
+	btst.l  #0,d0                   ; 10
+	beq     .done                   ; 10/8
+	move.b  d0,REG_DIPSW            ; 16
+	nop                             ; 4
+	subq.w  #1,d4                   ; 4
+	bne     .wait                   ; 10/8
+	moveq.l #0,d0					; SPI interface timeout
+	jmp		ErrSD
+.done:
+
+	move.b  SDREG_DIN,d0            ; 8
+	rts
+
 
 ErrSD:
 	lea     PALETTES,a0			; Set up palettes for text

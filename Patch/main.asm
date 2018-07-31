@@ -9,50 +9,19 @@
 
 	; CURRENT STATUS:
 	; Loading of files seem to work correctly, PRG files -ARE- loaded correctly
-	; Right when control is given to the game (jsr $122, with mode=2), game code runs for a while then
-	; a watchdog reset happens
-	; AOF3 $1140: reached sometimes
-	; AOF3 $1146: not reached
-	; AOF3 correctly returns to BIOS via C00444 after first call to entry point
-	; VBlank vector correctly loaded/restored after game load
+	; League Bowling loads and starts correctly, but gets stuck during attract mode after the ball zooms in
+	; The game select screen is animated but the countdown timer doesn't work, no reaction to controls
+	; Probably patched BIOS call issue
 
-	; AOF3's VBlank vector is $167E
-	; AOF3: Sometimes stuck in vblank wait loop at $1620
-	; Vblanks not enabled ? -> watchdog reset ?
+	; AOF3 loads but either resets or loads infinitely
 
-	; CHECKED OK: The game's VBL routine is repeatedly called right after the PRG loads
-	; They're routed to SYSTEM_INT1 by the game because of the 10FD80 flag
 	; TRIED:
 	; Replace League Bowling's .PRG by a custom one that just changes the backdrop color and sits in a loop
 	; kicking the watchdog. Backdrop color is set according to the VBL vector value (see if it's correct or not).
 	; Use a button to enable/disable interrupts. When game starts, SR should be == $2700 (all disabled).
 	; Result: works perfectly. VBL vector is correct. Enabling/disabling interrupts with SR also works perfectly.
-	
-	; League Bowling startup notes:
-	; BIOS jumps to $122 with BIOS_USER_REQUEST=0
-	; Game turns off all interrupts and uses a jump table to service the request
-	; Goes to $379C, where it copies some predefined data to RAM and returns to BIOS
-	; (watchdog wasn't kicked once but the routine executes very fast)
-	; SYSTEM_RETURN calls DMAClearPalettes which might get stuck with video output disabled <= TO CHECK
-	; BIOS doesn't do much more and jumps to $122 again with BIOS_USER_REQUEST=2
-	; Game turns off all interrupts and uses a jump table to service the request
-	; Goes to $37C6, where the game init itself takes place
-	; Call to FIX_CLEAR <= TO CHECK
-	; Clearing of VRAM done by game routine, not BIOS
-	; Watchdog kicked between call to init routines
-	; VBL wait at $37AA
-	; In VBL handler, SYS_IO is called <= TO CHECK
-
-	; TESTING:
-	; SYS_IO disabled CD lid check
-	; Also disable ProcessCDDACmds ?
-	; Also disable InitCDComm? ?
 
 	; Disabling CDC IRQs doesn't change anything
-
-	; Maybe AOF3 does something special ? Try another, earlier game ?
-	; CHECKED OK: No. League Bowling also fucks up right after loading
-
 
 
 	; STUFF FOR WHEN GAMES WILL WORK:
@@ -60,20 +29,53 @@
 	; Once a SD sector read is started, put FPGA in x-longwords read mode for 512 bytes
 
 	; From MAME's m68kops.cpp:
-	; move.b #addr,(a0)+:		20 cycles for 1 byte	Actual yield: 0.05 bytes per cycle
-	; move.b (a0),(a1)+:		12 cycles for 1 bytes   Possible: 0.08
-	; move.l (a0),(a1)+:		20 cycles for 4 bytes   Possible: 0.2
+	; move.b #addr,(a0)+:		20 cycles for 1 byte	Yield: 0.05 bytes per cycle
+	; move.b (a0),(a1)+:		12 cycles for 1 bytes   Yield: 0.08
+	; move.w (a0),(a1)+:		12 cycles for 2 bytes   Yield: 0.16 TESTING THIS
+	; move.l (a0),(a1)+:		20 cycles for 4 bytes   Yield: 0.2  TO TRY ?
 
-	; Current status: loads fast, data seems to be good, AOF3 doesn't start :( Sometimes stuck in a loop in game code
-	; zone, sometimes resets.
+	; PROGRESS LOG:
+	
+	; The IPL loading for TEST.ISO (League Bowling) is 5 files, total 2511536 bytes
+	; With SD sector loading 8*bytes with 2x NOPs
+	; Time taken: 2511536 bytes / 20.4s = 123114 bytes/s = 120kbytes/s
+	; Scope for PRG files: 13.8ms for 2048 bytes (1 CD sector): 145kbytes/s
+	;	SD sectors read, 2048 bytes: 4.31ms							31% :(
+	;		One SD sector read, 512 bytes: 4.31/4=1.07ms
+	;		Actual burst read for 512 bytes: 920us: 543kbytes/s		85% :)
+	;		Read setup for 512 bytes: 159us	                        15% :)
+	;	CD sector processing time: 9.6ms							69% :(
+	; CD sector processing is too slow !
+	
+	; With debug checksumming removed, and SD sector loading 8*bytes with 1x NOPs
+	; Time taken: 2511536 bytes / 9.2s = 272993 bytes/s = 266.6kbytes/s
+	; Scope for PRG files: 5.32ms for 2048 bytes (1 CD sector): 376kbytes/s
+	;	SD sectors read, 2048 bytes: 3.64ms							68% :)
+	;		One SD sector read, 512 bytes: 3.64/4=910us
+	;		Actual burst read for 512 bytes: 752us: 665kbytes/s		83% :)
+	;		Read setup for 512 bytes: 158us	                        17%
+	;	CD sector processing time: 1.68ms							32%
+	; Scope for SPR files: 5.44ms for 2048 bytes (1 CD sector): 368kbytes/s
+	;	SD sectors read, 2048 bytes: 3.66ms							67%
+	;	CD sector processing time: ?ms								33%
 
+	; With PutByteSPIFast, some debug print removed, SPI signalling optimized and removed nops for byte loads
+	; -> Crashes
+	; With PutByteSPIFast, some debug print removed, SPI signalling optimized
+	; -> Loads OK, ~9s total
+	; PCM sector processing is slower than the rest :(
+	
+	; With 16bit SPI burst reads and CPU word reads:
+	; ...
+
+	; When AOF3 was working:
 	; The IPL loading for TEST.ISO (Art of Fighting 3) is 13 files, total 1909814 bytes
 	; Time taken: 1909814 bytes / 10.08s = 189527 bytes/s = 185kbytes/s
 	; Scope for PRG files: 8.44ms for 2048 bytes (1 CD sector): 237kbytes/s
 	;	SD sectors read, 2048 bytes: 6.8ms							80%
 	;		One SD sector read, 512 bytes: 6.8/4=1.7ms
-	;		Actual burst read for 512 bytes: 1.008ms: 496kbytes/s		62%
-	;		Read setup for 512 bytes: 0.581ms                           38% :(
+	;		Actual burst read for 512 bytes: 1.008ms: 496kbytes/s	62%
+	;		Read setup for 512 bytes: 0.581ms                       38% :(
 	;	CD sector processing time: 1.764ms							20% :(
 	; Gain from 1x CD speed: (185-150)/150 = 23%
 

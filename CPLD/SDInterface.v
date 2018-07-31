@@ -15,6 +15,7 @@ module SDInterface(
 	output [6:0] HEX2,
 	output [6:0] HEX3,
 	output PS2_CLK,
+	output PS2_DAT,
 	
 	output SPI_MOSI,		// SD_CMD
 	output reg SPI_CS,	// SD_DAT3
@@ -25,10 +26,10 @@ module SDInterface(
 reg CARD_LOCK;
 reg HIGH_SPEED;
 reg [7:0] SPI_OUT;
-reg [7:0] SPI_IN;
-reg [7:0] SPI_IN_SR;
+reg [15:0] SPI_IN;
+reg [15:0] SPI_IN_SR;
 reg [4:0] CLK_DIV;
-reg [4:0] STEP_COUNTER;
+reg [5:0] STEP_COUNTER;
 reg BURST_MODE;
 reg [8:0] BURST_COUNTER;
 reg PREV_OE;
@@ -39,6 +40,7 @@ reg [18:0] M68K_DATA_REG /* synthesis noprune */ ;
 wire nRESET;
 wire SPI_BUSY;
 wire READ_SPI_BYTE;
+wire READ_SPI_WORD;
 wire READ_SPI_STATUS;
 wire [4:0] CLK_DIV_MAX;
 
@@ -71,6 +73,7 @@ assign GPIO_0_I3[30:29] = 2'bzz;
 assign GPIO_0_I3[27:21] = 7'bzzzzzzz;
 
 assign PS2_CLK = SPI_CLK;	// Debug output
+assign PS2_DAT = SPI_MISO;	// Debug output
 
 //A8 GPIO_0[0]
 //A7 GPIO_0[1]
@@ -114,6 +117,11 @@ assign PS2_CLK = SPI_CLK;	// Debug output
 //      ### ######## #######
 assign READ_SPI_BYTE = (M68K_ADDR[17:0] == 18'b001111010000000000) ? 1'b1 : 1'b0;
 
+// $C1E900 or $C1E901
+// 11000001 11101001 0000000x
+//      ### ######## #######
+assign READ_SPI_WORD = (M68K_ADDR[17:0] == 18'b001111010010000000) ? 1'b1 : 1'b0;
+
 // $C1E600 or $C1E601
 // 11000001 11100110 0000000x
 //      ### ######## #######
@@ -121,10 +129,11 @@ assign READ_SPI_STATUS = (M68K_ADDR[17:0] == 18'b001111001100000000) ? 1'b1 : 1'
 
 assign DATA_OUT = nSYSROM_OE ? 16'bzzzzzzzzzzzzzzzz :
 			READ_SPI_STATUS ? {7'b0000000, SPI_BUSY, 7'b0000000, SPI_BUSY} :
-			READ_SPI_BYTE ? {SPI_IN, SPI_IN} :
+			READ_SPI_BYTE ? {SPI_IN[7:0], SPI_IN[7:0]} :
+			READ_SPI_WORD ? {SPI_IN[15:8], SPI_IN[7:0]} :
 			16'bzzzzzzzzzzzzzzzz;	//SRAM_DQ;
 
-assign nEEPROM_OE = nSYSROM_OE | READ_SPI_STATUS | READ_SPI_BYTE;
+assign nEEPROM_OE = nSYSROM_OE | READ_SPI_STATUS | READ_SPI_BYTE | READ_SPI_WORD;
 
 assign nRESET = KEY[0];
 
@@ -147,7 +156,7 @@ begin
 	if (!nRESET)
 	begin
 		CARD_LOCK <= 1'b1;		// Lock SD card access
-		STEP_COUNTER <= 5'd0;
+		STEP_COUNTER <= 6'd0;
 		SPI_CS <= 1'b1;			// Deselect SD card
 		BURST_COUNTER <= 9'd0;
 		HIGH_SPEED <= 1'b0;		// Start in slow mode
@@ -180,7 +189,7 @@ begin
 					if (!CARD_LOCK)
 					begin
 						SPI_OUT <= M68K_ADDR[7:0];		// Load data from address bus
-						STEP_COUNTER <= 5'd16;
+						STEP_COUNTER <= 6'd16;
 						CLK_DIV <= 5'd0;
 					end
 				//end
@@ -204,16 +213,16 @@ begin
 				// "Read to set" SD card burst read mode $C1E700 or $C1E701
 				// 11000001 11100111 0000000x
 				//      ### ######## ###----
-				BURST_COUNTER <= 9'd511;
+				BURST_COUNTER <= 9'd255;	//9'd511;
 				SPI_OUT <= 8'hFF;
-				STEP_COUNTER <= 5'd16;
+				STEP_COUNTER <= 6'd32;
 				CLK_DIV <= 5'd0;
 			end
-			else if (READ_SPI_BYTE & |{BURST_COUNTER})
+			else if (READ_SPI_WORD & |{BURST_COUNTER})
 			begin
 				// Auto-read from SD card in burst mode
 				SPI_OUT <= 8'hFF;
-				STEP_COUNTER <= 5'd16;
+				STEP_COUNTER <= 6'd32;
 				CLK_DIV <= 5'd0;
 				BURST_COUNTER <= BURST_COUNTER - 1'b1;
 			end
@@ -228,14 +237,15 @@ begin
 			CLK_DIV <= CLK_DIV + 1'b1;
 		else
 		begin
+			// This takes 16*(1/50M)=320ns
 			CLK_DIV <= 5'd0;
 			if (STEP_COUNTER)
 			begin
 				STEP_COUNTER <= STEP_COUNTER - 1'b1;
 				if (STEP_COUNTER[0])
 				begin
-					SPI_OUT <= {SPI_OUT[6:0], 1'b0};				// Shift left
-					SPI_IN_SR <= {SPI_IN_SR[6:0], SPI_MISO};	// Shift left
+					SPI_OUT <= {SPI_OUT[6:0], 1'b1};				// Shift left
+					SPI_IN_SR <= {SPI_IN_SR[14:0], SPI_MISO};	// Shift left
 				end
 			end
 			else
