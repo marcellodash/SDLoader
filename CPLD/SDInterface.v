@@ -30,12 +30,14 @@ reg [15:0] SPI_IN;
 reg [15:0] SPI_IN_SR;
 reg [4:0] CLK_DIV;
 reg [5:0] STEP_COUNTER;
+reg IGNORE_STEP_FLAG;
 reg BURST_MODE;
-reg [8:0] BURST_COUNTER;
+reg [7:0] BURST_COUNTER;
 reg PREV_OE;
 reg PREV_PREV_OE;
 reg [18:0] M68K_ADDR_REG;
 reg [18:0] M68K_DATA_REG /* synthesis noprune */ ;
+reg REG_IN_FLAG;
 
 wire nRESET;
 wire SPI_BUSY;
@@ -50,6 +52,7 @@ wire [15:0] DATA_IN;
 wire nSYSROM_OE;
 wire nEEPROM_OE;
 
+// DEBUG
 SEG7_LUT_4 U3(HEX0, HEX1, HEX2, HEX3, M68K_ADDR_REG[15:0]);
 
 assign M68K_ADDR = {GPIO_0_I3[21], GPIO_0_I3[30:29], GPIO_0_I3[27:22], GPIO_0_I1[0], GPIO_0_I1[1], GPIO_0_I1[2],
@@ -72,8 +75,10 @@ assign nSYSROM_OE = GPIO_0_I1[9];
 assign GPIO_0_I3[30:29] = 2'bzz;
 assign GPIO_0_I3[27:21] = 7'bzzzzzzz;
 
-assign PS2_CLK = SPI_CLK;	// Debug output
-assign PS2_DAT = SPI_MISO;	// Debug output
+// DEBUG
+assign PS2_CLK = SPI_CLK;
+assign PS2_DAT = SPI_MISO;
+//assign PS2_DAT = ((M68K_DATA_REG == 16'h102D) && (M68K_ADDR_REG[15:0] == 16'h1214)) ? 1'b1 : 1'b0;
 
 //A8 GPIO_0[0]
 //A7 GPIO_0[1]
@@ -133,22 +138,25 @@ assign DATA_OUT = nSYSROM_OE ? 16'bzzzzzzzzzzzzzzzz :
 			READ_SPI_WORD ? {SPI_IN[15:8], SPI_IN[7:0]} :
 			16'bzzzzzzzzzzzzzzzz;	//SRAM_DQ;
 
+// Let the EEPROM reply only if the address isn't in the new registers space
+// Additionnal read zones must be added here or the EEPROM will fight for the bus !
 assign nEEPROM_OE = nSYSROM_OE | READ_SPI_STATUS | READ_SPI_BYTE | READ_SPI_WORD;
 
 assign nRESET = KEY[0];
 
+// DEBUG
 assign LEDG[0] = |{BURST_COUNTER};
-assign LEDG[4:1] = 4'd0;
-assign LEDG[5] = CARD_LOCK;
-assign LEDG[6] = SPI_BUSY;
-assign LEDG[7] = SW[0] | SW[1];
+assign LEDG[1] = CARD_LOCK;
+assign LEDG[2] = SPI_BUSY;
+assign LEDG[7:3] = 5'd0;
 
 assign CLK_DIV_MAX = HIGH_SPEED ? 5'd0 : 5'd30;		// SPI speed select
 assign SPI_MOSI = SPI_OUT[7];
-assign SPI_CLK = STEP_COUNTER[0];
+assign SPI_CLK = IGNORE_STEP_FLAG ? 1'b0 : STEP_COUNTER[0];
 
 assign SPI_BUSY = |{STEP_COUNTER};
 
+// nSYSROM_OE falling edge detector
 assign READ = ~PREV_OE & PREV_PREV_OE;
 
 always @(posedge CLOCK_50)
@@ -158,17 +166,19 @@ begin
 		CARD_LOCK <= 1'b1;		// Lock SD card access
 		STEP_COUNTER <= 6'd0;
 		SPI_CS <= 1'b1;			// Deselect SD card
-		BURST_COUNTER <= 9'd0;
+		BURST_COUNTER <= 8'd0;
 		HIGH_SPEED <= 1'b0;		// Start in slow mode
+		IGNORE_STEP_FLAG <= 1'b0;
 	end
 	else
 	begin
+		// DEBUG
 		M68K_ADDR_REG <= {M68K_ADDR, 1'b0};
 		M68K_DATA_REG <= DATA_IN;
 		
 		if (READ)
 		begin
-			// Falling edge of OE
+			// Falling edge of nSYSROM_OE
 			
 			if (M68K_ADDR[17:4] == 14'b00111100101000)
 			begin
@@ -189,7 +199,8 @@ begin
 					if (!CARD_LOCK)
 					begin
 						SPI_OUT <= M68K_ADDR[7:0];		// Load data from address bus
-						STEP_COUNTER <= 6'd16;
+						STEP_COUNTER <= 6'd16;			// Two steps per bit
+						IGNORE_STEP_FLAG <= 1'b1;		// Crappy glitch fix :(
 						CLK_DIV <= 5'd0;
 					end
 				//end
@@ -213,43 +224,56 @@ begin
 				// "Read to set" SD card burst read mode $C1E700 or $C1E701
 				// 11000001 11100111 0000000x
 				//      ### ######## ###----
-				BURST_COUNTER <= 9'd255;	//9'd511;
+				BURST_COUNTER <= 8'd255;		// 512 / 2 bytes per read - 1
 				SPI_OUT <= 8'hFF;
-				STEP_COUNTER <= 6'd32;
+				STEP_COUNTER <= 6'd32;			// Two steps per bit
+				IGNORE_STEP_FLAG <= 1'b1;		// Crappy glitch fix :(
 				CLK_DIV <= 5'd0;
 			end
 			else if (READ_SPI_WORD & |{BURST_COUNTER})
 			begin
 				// Auto-read from SD card in burst mode
 				SPI_OUT <= 8'hFF;
-				STEP_COUNTER <= 6'd32;
+				STEP_COUNTER <= 6'd32;			// Two steps per bit
+				IGNORE_STEP_FLAG <= 1'b1;		// Crappy glitch fix :(
 				CLK_DIV <= 5'd0;
 				BURST_COUNTER <= BURST_COUNTER - 1'b1;
 			end
 			
 		end
 		
+		// For edge detector
 		PREV_OE <= nSYSROM_OE;
 		PREV_PREV_OE <= PREV_OE;
 		
-		// SD card work
+		if (REG_IN_FLAG)
+		begin
+			SPI_IN <= SPI_IN_SR;
+			REG_IN_FLAG <= 1'b0;
+		end
+		
+		// SPI interface
 		if (CLK_DIV < CLK_DIV_MAX)
 			CLK_DIV <= CLK_DIV + 1'b1;
 		else
 		begin
-			// This takes 16*(1/50M)=320ns
-			CLK_DIV <= 5'd0;
-			if (STEP_COUNTER)
-			begin
-				STEP_COUNTER <= STEP_COUNTER - 1'b1;
-				if (STEP_COUNTER[0])
-				begin
-					SPI_OUT <= {SPI_OUT[6:0], 1'b1};				// Shift left
-					SPI_IN_SR <= {SPI_IN_SR[14:0], SPI_MISO};	// Shift left
-				end
-			end
+			// This should take 16*(1/50M)=320ns for 8 bit high-speed transfers
+			if (IGNORE_STEP_FLAG)
+				IGNORE_STEP_FLAG <= 1'b0;	// This is a crappy glitch fix to avoid assigning two different values to CLK_DIV in the same step
 			else
-				SPI_IN <= SPI_IN_SR;
+			begin
+				CLK_DIV <= 5'd0;
+				if (STEP_COUNTER)
+				begin
+					STEP_COUNTER <= STEP_COUNTER - 1'b1;
+					if (~STEP_COUNTER[0])
+						SPI_IN_SR <= {SPI_IN_SR[14:0], SPI_MISO};	// Shift left
+					else
+						SPI_OUT <= {SPI_OUT[6:0], 1'b1};				// Shift left
+				end
+				else
+					REG_IN_FLAG <= 1'b1;
+			end
 		end
 	end
 end

@@ -15,6 +15,9 @@ FixStrSDSecCnt:
 	dc.b "SD SECTORS  ",$F0,0
 FixStrCurAddr:
 	dc.b "CUR ADDRESS ",$F0,0
+	
+FixStrViewAddr:
+	dc.b $F0,0
 
 FixStrClear:
     dc.b "            ",0

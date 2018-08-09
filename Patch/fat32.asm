@@ -46,14 +46,15 @@
 ;	Root directory + (clusternumber - 3) * BYTESPERSECTOR * SECTORSPERCLUSTER (always -3 ?)
 ;	= $400000 + 1 * $0200 * $08 = $401000
 
-; Trashes D0, D4, D6, A0
+; Uses D0, D6, A0, A1
 ; Uses A1
 LoadSDSector:
 	move.b  d0,REG_DIPSW
 
-    move.w  SDREG_HIGHSPEED,d4
-    move.w  SDREG_CSLOW,d4
+    move.w  SDREG_HIGHSPEED,d0
+    move.w  SDREG_CSLOW,d0
 
+	; TODO: REMOVE
 	;movea.l #SDREG_DOUTBASE,a0	; TODO: a0 can be replaced by fixed value
 	;lsl.w   #1,d0
 	;andi.l  #$1FE,d0
@@ -61,26 +62,43 @@ LoadSDSector:
 	
 	lea     SDREG_DIN_WORD,a0
 
-	move.w  SDREG_INITBURST,d4	; Start burst read. d4 is throw-away
+	move.w  SDREG_INITBURST,d0	; Start burst read
 
-	; TESTING: word reads
-	move.w  #32,d6 			; Read whole SD sector (512 bytes) 512/16=32
+	; TESTING:
+	; NOPs aren't related to DRAM write speed
+	move.w  #16,d6 			; Read whole SD sector in words (512 bytes) 512/32=16
 .readsector:
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
 	nop
-	move.w  (a0),(a1)+		; SPI read
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
 	nop
 	subq.w  #1,d6
 	bne     .readsector
@@ -89,12 +107,13 @@ LoadSDSector:
 	rts
 
 
-; Trashes D0, D6, D7, A0, A1
+; MAKE SURE THIS PRESERVES USED REGISTERS !
+; Uses d0,d4,d6,d7,a0,a1
 LoadCDSectorFromSD:
-    movem.l d0-d7/a0-a6,-(sp)	; SLOW!
+    movem.l d0-d7/a0-a1,-(sp)	; SLOW!
 	move.b  d0,REG_DIPSW
 
-	moveq.l #4,d7               ; 4 SD sectors = 1 CD sector
+	moveq.l #4,d7               ; 4 SD sectors = 1 CD sector, 2048/512=4
 	lea     $111204,a1			; "CDSectorBuffer"
 
 .readsectors:
@@ -130,11 +149,11 @@ LoadCDSectorFromSD:
 	bne     .readsectors
 
 	move.b  d0,REG_DIPSW
-	move.b  BIOS_P1CURRENT,d0	; Stall and dump memory on C+D press during loading
+	move.b  BIOS_P1CURRENT,d0	; Stall and go to memory viewer on C+D press during loading
     cmp.b   #$C0,d0
 	bne     .go_on
-	lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
-	jmp     DumpMemory
+	lea     $0,a1				; Dump memory starting from $000000 and lock up
+	jmp     MemoryViewer
 .go_on:
 
 ; DEBUG, compute checksum of CD sector which was just loaded
@@ -143,7 +162,7 @@ LoadCDSectorFromSD:
 ;	move.l  d0,d6
 ;	move.l  #2048,d7
 ;.do_checksum:
-	move.b  d0,REG_DIPSW
+;	move.b  d0,REG_DIPSW
 ;	move.b  (a1)+,d6
 ;	add.w   d6,d0
 ;	subq.w  #1,d7
@@ -158,14 +177,14 @@ LoadCDSectorFromSD:
 ;	move.w  (a1),d6
 ;	cmp.w   d6,d0
 ;	beq     .chk_ok
-	move.b  d0,REG_DIPSW
+;	move.b  d0,REG_DIPSW
 ;	nop
 ;	nop
 ;	nop
 	;lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
 	;jmp     DumpMemory
-.chk_ok:
-.not_prog:
+;.chk_ok:
+;.not_prog:
 	move.b  d0,REG_DIPSW
 
 
@@ -188,7 +207,7 @@ LoadCDSectorFromSD:
     subq.w  #1,CDSectorCount
 	move.w  CDSectorCount,$10F688
 	
-	addq.w  #1,DebugChecksumIdx	; DEBUG
+	;addq.w  #1,DebugChecksumIdx	; DEBUG
 
-    movem.l (sp)+,d0-d7/a0-a6	; SLOW!
+    movem.l (sp)+,d0-d7/a0-a1	; SLOW!
     rts

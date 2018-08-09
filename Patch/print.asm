@@ -38,7 +38,7 @@ WriteFix:
     lea     FixValueList,a1
     move.l  (a1,d3),d3
 	move.w  d1,d2
-    move.l  #8,d7
+    moveq.l #8,d7
 .writelong:
 	rol.l   #4,d3
 	move.b  d3,d2
@@ -58,48 +58,43 @@ ClearFix:
 	move.w  #$7000,REG_VRAMADDR
 	nop
 	move.w  #1,REG_VRAMMOD
-	move.l  #32*40,d7
+	move.w  #32*40,d7
 .clear:
     move.w  #$0020,REG_VRAMRW
 	move.b  d0,REG_DIPSW
-	subq.l  #1,d7
+	subq.w  #1,d7
 	bne     .clear
 	rts
-    
-
-DumpMemory:
-	move.b  d0,REG_DIPSW
-	lea     PALETTES,a0			; Set up palettes for text
-	move.w  #BLACK,(a0)+
-	move.w  #WHITE,(a0)+
-	move.w  #BLACK,(a0)
-
-	jsr     ClearFix
 	
-	move.b  #1,REG_ENVIDEO
-	move.b  #0,REG_DISBLSPR
-	move.b  #0,REG_DISBLFIX
 
-	move.w  #$3100,FixWriteConfig
+RefreshDump:
+	jsr     ClearFix
 
+	move.w  #$3100,FixWriteConfig	; Palette 3, bank 1
+	
+	; Print address
+	lea     FixValueList,a0
+	move.l  a1,(a0)+
+    lea     FixStrViewAddr,a0
+	move.w  #FIXMAP+3+(2*32),d0
+	jsr     WriteFix
+
+	movea.l a1,a2
 	move.w  #32,REG_VRAMMOD
-    nop
-    nop
-    nop
-    move.w  #FIXMAP+2+(2*32),d0
-	move.l  #26,d7
+    move.w  #FIXMAP+5+(6*32),d0
+	move.w  #24,d7			; 24 lines
 .writeblock:
 	move.w  d0,REG_VRAMADDR
 	moveq.l #0,d1
-	move.l  #18,d6
+	move.w  #16,d6			; 16 bytes per line (32 chars)
 .writeline:
 	move.b  d0,REG_DIPSW
-	move.b  (a1)+,d2
+	move.b  (a2)+,d2		; Read byte from memory
+	move.b  d2,d1 			; Split in nibbles
 
-	move.b  d2,d1
 	lsr.b   #4,d1
 	cmpi.b  #9,d1
-	bls     .deci_a
+	bls     .deci_a			; Hexify
     addi.b  #7,d1
 .deci_a:
     addi.b  #$30,d1
@@ -109,7 +104,7 @@ DumpMemory:
 	move.b  d2,d1
 	andi.b  #$F,d1
 	cmpi.b  #9,d1
-	bls     .deci_b
+	bls     .deci_b			; Hexify
     addi.b  #7,d1
 .deci_b:
     addi.b  #$30,d1
@@ -118,37 +113,52 @@ DumpMemory:
 	subq.b  #1,d6
 	bne     .writeline
 
-	addi.w  #1,d0
+	addi.w  #1,d0			; Go down one line in the fix map
 	subq.b  #1,d7
 	bne     .writeblock
+	rts
 
-.lockup:
+
+MemoryViewer:
 	move.b  d0,REG_DIPSW
-	nop
-	nop
-	nop
 
-	move.b  BIOS_P1CURRENT,d0	; A=0 B=512 C=512+512 D=512+512+512
+	lea     (2*16*3)+PALETTES,a0	; Set up palette 3 for text
+	move.w  #BLACK,(a0)+
+	move.w  #WHITE,(a0)+
+	move.w  #BLACK,(a0)
 
-    cmp.b   #$10,d0
-    bne     .no_a
-	lea     $111204,a1			; Dump memory starting from "CDSectorBuffer" and lock up
-	bra     DumpMemory
-.no_a:
-    cmp.b   #$20,d0
-    bne     .no_b
-	lea     $111404,a1			; Dump memory starting from "CDSectorBuffer" and lock up
-	bra     DumpMemory
-.no_b:
-    cmp.b   #$40,d0
-    bne     .no_c
-	lea     $111604,a1			; Dump memory starting from "CDSectorBuffer" and lock up
-	bra     DumpMemory
-.no_c:
-    cmp.b   #$80,d0
-    bne     .no_d
-	lea     $111804,a1			; Dump memory starting from "CDSectorBuffer" and lock up
-	bra     DumpMemory
-.no_d:
+	jsr     RefreshDump
 
-    bra     .lockup
+	move.b  #1,REG_ENVIDEO
+	move.b  #0,REG_DISBLSPR
+	move.b  #0,REG_DISBLFIX
+
+.loop:
+	move.b  d0,REG_DIPSW
+
+	move.b  BIOS_P1CHANGE,d0
+
+    cmp.b   #$01,d0
+    bne     .no_up
+	;cmp.l   #0,a1
+	;beq     .no_up
+	subi.l  #16,a1				; UP: Address -= 16
+	jsr     RefreshDump
+.no_up:
+    cmp.b   #$02,d0
+    bne     .no_down
+	addi.l  #16,a1				; DOWN: Address += 16
+	jsr     RefreshDump
+.no_down:
+    cmp.b   #$04,d0
+    bne     .no_left
+	subi.l  #256,a1				; LEFT: Address -= 256
+	jsr     RefreshDump
+.no_left:
+    cmp.b   #$08,d0
+    bne     .no_right
+	addi.l  #256,a1				; RIGHT: Address += 256
+	jsr     RefreshDump
+.no_right:
+
+    bra     .loop

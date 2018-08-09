@@ -23,15 +23,10 @@
 ;Read until token ($FE) is received
 ;Receive 512 bytes + 2 bytes CRC
 ;
-;Interface:
-;
-;We need a speed switch for clk (<=400kHz -> X MHz)
 ;Write byte, wait while busy sending (only during low clk speed ?)
 ;
 ;12MHz / 32 = 375kHz for slow SPI ?
 ;Is 12MHz safe for fast SPI ?
-;
-; "Writes" are done by reading at specific addresses
 
 InitSD:
 	jsr     UnlockSD
@@ -245,7 +240,7 @@ PutByteSPI:
 PutByteSPIFast:
 	move.b  d0,REG_DIPSW
 
-    move.w  SDREG_CSLOW,d4
+    move.w  SDREG_CSLOW,d4          ; 16
 
 	movea.l #SDREG_DOUTBASE,a0		; 12
 	add.w   d0,d0                   ; 4
@@ -256,7 +251,7 @@ PutByteSPIFast:
 	; Wait for interface not busy
 	move.w  #$FFFF,d4				; 8
 .wait:
-	move.w  SDREG_STATUS,d0         ; 8
+	move.w  SDREG_STATUS,d0         ; 16
 	btst.l  #0,d0                   ; 10
 	beq     .done                   ; 10/8
 	move.b  d0,REG_DIPSW            ; 16
@@ -267,7 +262,7 @@ PutByteSPIFast:
 	jmp		ErrSD
 .done:
 
-	move.b  SDREG_DIN,d0            ; 8
+	move.b  SDREG_DIN,d0            ; 16
 	rts
 
 

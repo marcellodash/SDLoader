@@ -3,7 +3,6 @@ SDISOStart		equ		$10D100	; Longword
 ISOLoadStart	equ		$10D104 ; Longword
 SDLoadStart		equ		$10D108 ; Longword
 CDSectorCount	equ		$10D10C	; Word
-;SDSectorCount	equ		$10D110	; Longword
 DebugChecksumIdx equ	$10D120	; Word
 
 FixWriteConfig	equ		$10D120 ; Word		ORed with fix tilemap data to set fix text palette
