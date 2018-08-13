@@ -37,7 +37,7 @@ ErrUninit:
 DispExc:
 	ori.w   #$0700,sr
 	
-	move.w  #$3100,FixWriteConfig
+	move.w  #$3000,FixWriteConfig
 
 	move.w  #FIXMAP+8+(4*32),d0
 	jsr     WriteFix
@@ -77,6 +77,32 @@ DispExc:
 	move.b  #0,REG_DISBLSPR
 	move.b  #0,REG_DISBLFIX
 
+.lockup:
+	move.b  d0,REG_DIPSW
+	nop
+	nop
+	nop
+    bra     .lockup
+
+ErrSD:
+	lea     PALETTES,a0			; Set up palettes for text
+	move.w  #BLACK,(a0)+
+	move.w  #WHITE,(a0)+
+	move.w  #BLACK,(a0)
+
+	jsr     ClearFix
+
+	move.b  #1,REG_ENVIDEO
+	move.b  #0,REG_DISBLSPR
+	move.b  #0,REG_DISBLFIX
+
+    lea     ErrFixStrList,a0
+	add.w   d0,d0
+	add.w   d0,d0
+	adda.l  d0,a0
+	movea.l (a0),a0
+	move.w  #FIXMAP+4+(4*32),d0
+	jsr     WriteFix
 .lockup:
 	move.b  d0,REG_DIPSW
 	nop

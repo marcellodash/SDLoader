@@ -25,19 +25,21 @@
 ;
 ;Write byte, wait while busy sending (only during low clk speed ?)
 ;
-;12MHz / 32 = 375kHz for slow SPI ?
+;12MHz / 30 = 375kHz for slow SPI ?
 ;Is 12MHz safe for fast SPI ?
 
 InitSD:
-	jsr     UnlockSD
+    move.w  SDREG_UNLOCK,d0
 
-	move.b  #10,d7				; 80 pulses with DOUT = 1
+    ; 80 pulses with DOUT = 1
+	move.b  #10,d7
 .clks:
 	move.w  #$02FF,d0			; CS high, low speed, data all ones
 	jsr     PutByteSPI
 	subq.b  #1,d7
 	bne     .clks
 
+	; Make card go to idle state
     move.b  #50,d7				; Max tries
 .cmd0:
 	move.w  #$0000,d0			; CS low, low speed, CMD0
@@ -58,11 +60,12 @@ InitSD:
 	move.w  #$0029,d0			; CS low, low speed, ACMD41
 	jsr     SDCommand
 	jsr     GetR1
-	move.b  #0,d5				; Default card type: MMC
+	move.w  #0,d5				; Default card type: MMC
 	cmp.b   #$01,d0
 	bhi     .mmc
-	move.b  #1,d5				; SDC card !
+	move.w  #1,d5				; SDC card !
 .mmc:
+	move.w  d5,CardType
 
     move.b  #200,d7				; Max tries
 .init:
@@ -126,9 +129,9 @@ Delay:
 
 ; Uses D6
 GetR1:
-	move.b  d0,REG_DIPSW
 	moveq.l #10,d6				; Max tries
 .try:
+	move.b  d0,REG_DIPSW
 	move.w  #$00FF,d0			; CS low, low speed, data all ones
 	jsr     PutByteSPI
 	cmp.b   #$FF,d0
@@ -148,17 +151,6 @@ GetR2:
 	move.b  d0,d1
 	move.w  d1,d0
 	rts
-
-	moveq.l #10,d6				; Max tries
-.try:
-	move.w  #$00FF,d0			; CS low, low speed, data all ones
-	jsr     PutByteSPI
-	cmp.b   #$FF,d0
-	bne     .gotr1
-	subq.b  #1,d6
-	bne     .try
-.gotr1:
-    rts
 
 ; Uses D1, D2, D4, A0
 SDCommand:
@@ -266,35 +258,174 @@ PutByteSPIFast:
 	rts
 
 
-ErrSD:
-	lea     PALETTES,a0			; Set up palettes for text
-	move.w  #BLACK,(a0)+
-	move.w  #WHITE,(a0)+
-	move.w  #BLACK,(a0)
-
-	jsr     ClearFix
-
-	move.b  #1,REG_ENVIDEO
-	move.b  #0,REG_DISBLSPR
-	move.b  #0,REG_DISBLFIX
-
-    lea     ErrFixStrList,a0
-	add.w   d0,d0
-	adda.l  d0,a0
-	movea.l (a0),a0
-	move.w  #FIXMAP+4+(4*32),d0
-	jsr     WriteFix
-.lockup:
+; Uses D0, D6, A0, A1
+; Uses A1
+LoadSDSector:
 	move.b  d0,REG_DIPSW
-	nop
-	nop
-	nop
-    bra     .lockup
 
-LockSD:
-    move.w  SDREG_LOCK,d0
+    move.w  SDREG_HIGHSPEED,d0
+    move.w  SDREG_CSLOW,d0
+
+	lea     SDREG_DIN_WORD,a0
+
+	move.w  SDREG_INITBURST,d0	; Start burst read
+
+	; TESTING:
+	; NOPs aren't related to DRAM write speed
+	move.w  #16,d6 			; Read whole SD sector in words (512 bytes) 512/32=16
+.readsector:
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	move.w  (a0),(a1)+		; SPI word read
+	nop
+	subq.w  #1,d6
+	bne     .readsector
+
+	move.b  d0,REG_DIPSW
 	rts
 
-UnlockSD:
-    move.w  SDREG_UNLOCK,d0
+
+; MAKE SURE THIS PRESERVES USED REGISTERS !
+; Uses d0,d4,d6,d7,a0,a1
+LoadRawSectorFromSD:
+    movem.l d0-d7/a0-a1,-(sp)	; SLOW!
+
+	; Start new multiple-read
+	move.w  #$0111,d0			; CS low, high speed, CMD17 (17 = $11)
+	move.l  SDLoadStart,d2
+	jsr     SDCommand
+	jsr     GetR1
+	tst.b   d0
+	beq     .cmdreadok
+	moveq.l #7,d0				; CMD17 wasn't accepted
+	jmp		ErrSD
+.cmdreadok:
+
+	lea     SDSectorBuffer,a1
+
+	; Wait for data token
+	moveq.l #200,d6				; Max tries
+.try:
+	move.b  d0,REG_DIPSW
+	move.w  #$01FF,d0			; CS low, high speed, data all ones
+	jsr     PutByteSPIFast
+	cmp.b   #$FE,d0
+	beq     .gottoken
+	subq.b  #1,d6
+	bne     .try
+	moveq.l #5,d0				; Didn't get the data token in time
+	jmp		ErrSD
+.gottoken:
+
+	jsr     LoadSDSector
+
+	move.w  #$01FF,d0			; Discard CRC
+	jsr     PutByteSPIFast
+	move.w  #$01FF,d0
+	jsr     PutByteSPIFast
+
+	move.w  #$0300,d0			; CS high
+	jsr     PutByteSPI
+
+    movem.l (sp)+,d0-d7/a0-a1	; SLOW!
+    rts
+
+
+; MAKE SURE THIS PRESERVES USED REGISTERS !
+; Uses d0,d4,d6,d7,a0,a1
+LoadCDSectorFromSD:
+    movem.l d0-d7/a0-a1,-(sp)	; SLOW!
+	move.b  d0,REG_DIPSW
+
+	moveq.l #4,d7               ; 4 SD sectors = 1 CD sector, 2048/512=4
+	lea     $111204,a1			; "CDSectorBuffer"
+
+.readsectors:
+
+	; Wait for data token
+	moveq.l #200,d6				; Max tries
+.try:
+	move.b  d0,REG_DIPSW
+	move.w  #$01FF,d0			; CS low, high speed, data all ones
+	jsr     PutByteSPIFast
+	cmp.b   #$FE,d0
+	beq     .gottoken
+	subq.b  #1,d6
+	bne     .try
+	moveq.l #5,d0				; Didn't get the data token in time
+	jmp		ErrSD
+.gottoken:
+
+	jsr     LoadSDSector
+
+	move.w  #$01FF,d0			; Discard CRC
+	jsr     PutByteSPIFast
+	move.w  #$01FF,d0
+	jsr     PutByteSPIFast
+
+	move.w  #$0300,d0			; CS high
+	jsr     PutByteSPI
+
+	addi.l  #512,SDLoadStart
+
+	subq.b  #1,d7
+	tst.b   d7
+	bne     .readsectors
+
+	move.b  d0,REG_DIPSW
+	move.b  BIOS_P1CURRENT,d0	; Stall and go to memory viewer on C+D press during loading
+    cmp.b   #$C0,d0
+	bne     .go_on
+	lea     $0,a1				; Dump memory starting from $000000 and lock up
+	jmp     MemoryViewer
+.go_on:
+
+	;lea     FixValueList,a0		; SLOW! Used only for debug
+	;move.l  SDLoadStart,(a0)+
+    ;lea     FixStrCurAddr,a0
+	;move.w  #FIXMAP+12+(6*32),d0
+	;jsr     WriteFix            ; Display absolute address of loading start in SD card and Subsector (3~0)
+
+	; For original progressbar update:
+	move.b  d0,REG_DIPSW
+	move.l  $10F690,d0
+	add.l   $10F68C,d0
+	cmpi.l  #$800000,d0
+	bls     .nocap
+	move.l  #$800000,d0
+.nocap:
+	move.l  d0,$10F690
+
+    subq.w  #1,CDSectorCount
+	move.w  CDSectorCount,$10F688
+
+    movem.l (sp)+,d0-d7/a0-a1	; SLOW!
     rts

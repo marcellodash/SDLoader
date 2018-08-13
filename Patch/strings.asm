@@ -23,6 +23,10 @@ FixStrClear:
     dc.b "            ",0
 FixStrSector:
 	dc.b "SEC ",$F0,0
+StrFAT32:
+    dc.b "FAT32",0
+FixStrClusterIdx:
+	dc.b "",$F0,0
 
 FixStrOhCrap:
     dc.b "OH CRAP :(",0
@@ -64,6 +68,8 @@ ErrFixStrList:
     dc.l FixStrDataTokenTimeout
     dc.l FixStrStopReadFailed
     dc.l FixStrStartReadFailed
+    dc.l FixStrBadSignature
+    dc.l FixStrBadFSType
 
 FixStrInterfaceTimeout:				; 0
 	dc.b "SPI interface timeout",0
@@ -74,10 +80,14 @@ FixStrSDInitFailed:					; 2
 FixStrSDWrongStatus:                ; 3
 	dc.b "SD wrong status",0
 FixStrCMD16Failed:					; 4
-	dc.b "CMD16 filed",0
+	dc.b "CMD16 failed",0
 FixStrDataTokenTimeout:				; 5
 	dc.b "Data token timeout",0
 FixStrStopReadFailed:				; 6
 	dc.b "Read stop failed",0
 FixStrStartReadFailed:				; 7
 	dc.b "Read start failed",0
+FixStrBadSignature:					; 8
+	dc.b "Bad boot record signature",0
+FixStrBadFSType:					; 9
+	dc.b "Filesystem is not FAT32",0
