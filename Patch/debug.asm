@@ -1,13 +1,16 @@
 DrawProgressAnimation:
 	; Display sector counter at 18,16
 	move.w  #$3100,FixWriteConfig
-    lea     FixValueList,a0
-    moveq.l #0,d0
-	move.w  $10F688,d0			; "SectorCounter"
-	move.l  d0,(a0)
-    lea     FixStrSector,a0
 	move.w  #FIXMAP+16+(20*32),d0
-    jsr     WriteFix
+	move.w  $10F688,d2			; "SectorCounter"
+    jsr     WriteWord
+	;lea     FixValueList,a0
+    ;moveq.l #0,d0
+	;move.w  $10F688,d0			; "SectorCounter"
+	;move.l  d0,(a0)
+    ;lea     FixStrSector,a0
+	;move.w  #FIXMAP+16+(20*32),d0
+    ;jsr     WriteFix
 	rts
 	
 DebugDispFileName:

@@ -25,6 +25,7 @@ module SDInterface(
 
 reg CARD_LOCK;
 reg HIGH_SPEED;
+reg REG_GPIO;
 reg [7:0] SPI_OUT;
 reg [15:0] SPI_IN;
 reg [15:0] SPI_IN_SR;
@@ -35,8 +36,8 @@ reg BURST_MODE;
 reg [7:0] BURST_COUNTER;
 reg PREV_OE;
 reg PREV_PREV_OE;
-reg [18:0] M68K_ADDR_REG;
-reg [18:0] M68K_DATA_REG /* synthesis noprune */ ;
+reg [16:0] M68K_ADDR_REG;
+reg [15:0] M68K_DATA_REG /* synthesis noprune */ ;
 reg REG_IN_FLAG;
 
 wire nRESET;
@@ -76,9 +77,10 @@ assign GPIO_0_I3[30:29] = 2'bzz;
 assign GPIO_0_I3[27:21] = 7'bzzzzzzz;
 
 // DEBUG
-assign PS2_CLK = SPI_CLK;
-assign PS2_DAT = SPI_MISO;
-//assign PS2_DAT = ((M68K_DATA_REG == 16'h102D) && (M68K_ADDR_REG[15:0] == 16'h1214)) ? 1'b1 : 1'b0;
+assign PS2_CLK = SW[0] ? SPI_CLK : REG_GPIO;
+assign PS2_DAT = SW[1] ? SPI_MOSI : SPI_MISO;
+assign LEDG[0] = SW[0];
+assign LEDG[1] = SW[1];
 
 //A8 GPIO_0[0]
 //A7 GPIO_0[1]
@@ -117,6 +119,11 @@ assign PS2_DAT = SPI_MISO;
 //D6 GPIO_0[34]
 //D13 GPIO_0[35]
 
+// $C1E600 or $C1E601
+// 11000001 11100110 0000000x
+//      ### ######## #######
+assign READ_SPI_STATUS = (M68K_ADDR[17:0] == 18'b001111001100000000) ? 1'b1 : 1'b0;
+
 // $C1E800 or $C1E801
 // 11000001 11101000 0000000x
 //      ### ######## #######
@@ -126,11 +133,6 @@ assign READ_SPI_BYTE = (M68K_ADDR[17:0] == 18'b001111010000000000) ? 1'b1 : 1'b0
 // 11000001 11101001 0000000x
 //      ### ######## #######
 assign READ_SPI_WORD = (M68K_ADDR[17:0] == 18'b001111010010000000) ? 1'b1 : 1'b0;
-
-// $C1E600 or $C1E601
-// 11000001 11100110 0000000x
-//      ### ######## #######
-assign READ_SPI_STATUS = (M68K_ADDR[17:0] == 18'b001111001100000000) ? 1'b1 : 1'b0;
 
 assign DATA_OUT = nSYSROM_OE ? 16'bzzzzzzzzzzzzzzzz :
 			READ_SPI_STATUS ? {7'b0000000, SPI_BUSY, 7'b0000000, SPI_BUSY} :
@@ -145,10 +147,11 @@ assign nEEPROM_OE = nSYSROM_OE | READ_SPI_STATUS | READ_SPI_BYTE | READ_SPI_WORD
 assign nRESET = KEY[0];
 
 // DEBUG
-assign LEDG[0] = |{BURST_COUNTER};
-assign LEDG[1] = CARD_LOCK;
-assign LEDG[2] = SPI_BUSY;
-assign LEDG[7:3] = 5'd0;
+assign LEDG[3:2] = 3'd0;
+assign LEDG[4] = REG_GPIO;
+assign LEDG[5] = |{BURST_COUNTER};
+assign LEDG[6] = SPI_MISO;
+assign LEDG[7] = CARD_LOCK;
 
 assign CLK_DIV_MAX = HIGH_SPEED ? 5'd0 : 5'd30;		// SPI speed select
 assign SPI_MOSI = SPI_OUT[7];
@@ -169,11 +172,12 @@ begin
 		BURST_COUNTER <= 8'd0;
 		HIGH_SPEED <= 1'b0;		// Start in slow mode
 		IGNORE_STEP_FLAG <= 1'b0;
+		REG_GPIO <= 1'b0;
 	end
 	else
 	begin
 		// DEBUG
-		M68K_ADDR_REG <= {M68K_ADDR, 1'b0};
+		M68K_ADDR_REG <= {M68K_ADDR[15:0], 1'b0};
 		M68K_DATA_REG <= DATA_IN;
 		
 		if (READ)
@@ -187,6 +191,13 @@ begin
 				//      ### ######## ###----
 				if (!SPI_BUSY)
 					CARD_LOCK <= M68K_ADDR[3];
+			end
+			else if (M68K_ADDR[17:4] == 14'b00111101010000)
+			begin
+				// "Read to trigger" GPIO set/reset at $C1EA00 or $C1EA01 = 0, $C1EA10 or $C1EA11 = 1
+				// 11000001 11101010 000d000x
+				//      ### ######## ###----
+					REG_GPIO <= M68K_ADDR[3];
 			end
 			else if (M68K_ADDR[17:8] == 10'b0011110000)
 			begin

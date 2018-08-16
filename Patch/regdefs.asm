@@ -144,9 +144,9 @@ SOUND_STOP      equ $D00046
 
 ;Button definitions:
 CNT_UP	        equ 0
-CNT_DOWN	equ 1
-CNT_LEFT	equ 2
-CNT_RIGHT	equ 3
+CNT_DOWN		equ 1
+CNT_LEFT		equ 2
+CNT_RIGHT		equ 3
 CNT_A	        equ 4
 CNT_B	        equ 5
 CNT_C	        equ 6

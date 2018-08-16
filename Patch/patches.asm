@@ -1,13 +1,26 @@
-	ORG $C0BBC8					; Replacement to avoid using DMA copy
-	dc.l UploadPRGDMAWords
+	ORG $C0BBCC					; Replacement to avoid using DMA copy
+	dc.l UploadFIXDMABytes
 	ORG $C0BBD4					; Replacement to avoid using DMA copy
 	dc.l UploadZ80DMABytes
-	ORG $C0BBE8					; Replacement to avoid using DMA copy
-	dc.l UploadPRGDMAWords
-	
-	; TODO: Re-enable this when loading will work !
-	;ORG $C0BF5E
-	;jmp     CopyBytesToWordCPULoop	; Cache-to-DRAM copy speed optimization attempt to speed up PCM loads
+	ORG $C0BD5A					; Avoid using DMA copy in UploadSPRDMAWords
+	nop
+	nop
+	nop
+	nop
+	ORG $C0BDF2					; Avoid using DMA copy in UploadPCMDMABytes
+	nop
+	nop
+	nop
+	nop
+	ORG $C0BEA2					; Avoid using DMA copy in UploadPRGDMAWords
+	nop
+	nop
+	nop
+	nop
+	ORG $C0BEE6					; Replace RunDMADirect for UploadPRGDMAWords, UploadPalDMAWords and UploadSPRDMAWords
+	jmp    RunDMADirect
+	ORG $C0BF5E
+	jmp    CopyBytesToWordCPU	; Cache-to-DRAM copy speed optimization attempt to speed up PCM loads
 
 	ORG $C0C1F6
 	dc.l   CDPlayerVBLProc		; Replace pointer to CDPlayerVBLProc by one to new code

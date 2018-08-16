@@ -7,6 +7,60 @@
 
 	; !!! See doc.odt !!!
 
+	; Times measured 16/08/2018
+	; 3COUNTB:  IPL 4s93        Plays ok
+	; 2020BB:   IPL 11s81		Sometimes intro locks up ?
+	; ALPHAM2:  IPL 10s87       Plays ok
+	; AODK:     IPL 7s89        Plays ok
+	; AOF2:     IPL 6s37        Plays ok
+	; AOF3:     IPL 6s24        Plays ok
+	; BJOURNEY: IPL 12s32       Plays ok
+	; BREAKERS: IPL 7s43        Plays ok
+	; BSTARS:   IPL 10s89       Plays ok
+	; BSTARS2:  IPL 11s93       Plays ok
+	; CRSWORD:  IPL 12s07       Plays ok
+	; CRSWORD2: IPL Read start failed
+	; CYBERLIP: IPL Read start failed
+	; DOUBLEDR: IPL Read start failed
+	; FATFURSP: IPL Reset
+	; FATFURY1: IPL 12s19       Plays ok
+	; FATFURY2: IPL Read start failed / sector dump
+	; FATFURY3: IPL Freeze
+	; FBFRENZY: IPL 12s30       Plays ok
+	; FINALROM: IPL 10s81       Plays ok
+	; IRONCLAD: IPL 10s93       Plays ok
+	; JOYJOY:   IPL 5s00        Plays ok
+	; KABUKIKL: IPL 6s43        Plays ok
+	; KOF94:    IPL Read start failed
+	; KOF95:    IPL 10s57 		Character select address error PC=4276 A0=01D0FEFF
+	; KOF96:    IPL Read start failed
+	; KOF97:    IPL 5s40        Plays ok
+	; LBOWL:    IPL 6s37        Plays ok
+	; LRESORT:  IPL Read start failed
+	; MAGLORD:  IPL 8s82        Plays ok
+	; MSLUG:    IPL Data token timeout
+	; MUTNAT:   IPL 12s75       Plays ok
+	; NAM1975:  IPL 12s24       Plays ok
+	; NCOMBAT:  IPL 10s18       Plays ok
+	; NCOMMAND: IPL 12s74       Plays ok
+	; NEODRIFT: IPL 7s68        Plays ok
+	; PBOBBLE:  IPL 6s14        Plays ok
+	; PGOAL:    IPL 11s62       Plays ok
+	; RIDHERO:  IPL 8s30        Plays ok
+	; ROBOARMY: IPL 10s24		Copy protection
+	; SENGOKU:  IPL 12s26       Plays ok
+	; SENGOKU2: IPL 12s66       Plays ok
+	; SONICWI2: IPL OK 			Sprites corrupt, check iso
+	; SONICWI3: IPL address error PC=C0EF96 A0=00111A26 A1=00111271
+	; STRHOOP:  IPL 12s57       Plays ok
+	; SUPERPSY: IPL 11s99       Plays ok
+	; TOPHUNTR: IPL 11s80		Game start SD error
+	; TURFMAST: IPL 10s93       Plays ok
+	; TWINSPI:  IPL 8s13		Game start crash
+	; VIEWPOIN: IPL 10s87       Plays ok
+	; WH2:      IPL 7s31 		Game start read start failed
+	; WJAMMERS: IPL 12s07       Plays ok
+
 	INCLUDE "patches.asm"
 
 	; New code starts from here ---------------------------
@@ -31,50 +85,74 @@ CDPlayerVBLProc:
     jsr     $C0E9A0 			; CDPControllerStuff, copied from original routine
     
     ; Handle input to allow selection of ISO file from list
-    move.b  BIOS_P1CHANGE,d0
-
-	btst    #0,d0
+    move.b  BIOS_P1REPEAT,d0
+	btst    #CNT_UP,d0
     beq     .no_up
-    tst.w   MenuCursor
+    tst.b   MenuCursor
+    beq     .top
+    subq.b  #1,MenuCursor
+    bra     .no_up
+.top:
+    tst.b   MenuShift
     beq     .no_up
-    subq.w  #1,MenuCursor
+    subq.b  #1,MenuShift
+	st.b    RefreshList
 .no_up:
 
-	btst    #1,d0
+    move.b  BIOS_P1REPEAT,d0
+	btst    #CNT_DOWN,d0
     beq     .no_down
-    cmp.w   #16,MenuCursor		; TODO: Change max
+    cmp.b   #15,MenuCursor		; Max lines at once
+    beq     .bottom
+    addq.b  #1,MenuCursor
+    bra     .no_down
+.bottom:
+	move.b  MenuShift,d0
+	addi.b  #16,d0
+	cmp.b   ISOFilesCount,d0
     beq     .no_down
-    addq.w  #1,MenuCursor
+    addq.b  #1,MenuShift
+	st.b    RefreshList
 .no_down:
 
-	move.w  MenuCursorPrev,d0
-	cmp.w   MenuCursor,d0
-	beq     .no_redraw
-	andi.w  #$00FF,d0
+	move.b  MenuCursorPrev,d0
+	cmp.b   MenuCursor,d0
+	beq     .no_refresh_cur
 	; Erase previous cursor
+	move.b  MenuCursorPrev,d0
+	andi.w  #$007F,d0
 	add.w  #FIXMAP+9+(9*32),d0
 	move.w  d0,REG_VRAMADDR
 	nop
 	nop
 	move.w  #$3020,REG_VRAMRW	; Space, palette 3
 	; Draw new cursor
-	move.w  #FIXMAP+9+(9*32),d0
-	add.w   MenuCursor,d0
+	move.b  MenuCursor,d0
+	andi.w  #$007F,d0
+	addi.w  #FIXMAP+9+(9*32),d0
 	move.w  d0,REG_VRAMADDR
 	nop
 	nop
 	move.w  #$3011,REG_VRAMRW	; Arrow pointing right, palette 3
-	move.w  MenuCursor,MenuCursorPrev
-.no_redraw:
+	move.b  MenuCursor,MenuCursorPrev
+.no_refresh_cur:
 
-    move.b  BIOS_P1CHANGE,d0
-	btst    #4,d0
+	tst.b   RefreshList
+	beq     .no_refresh_list
+	jsr     DrawISOList
+.no_refresh_list:
+
+    move.b  BIOS_P1REPEAT,d0
+	btst    #CNT_A,d0
     beq     .no_a
     ; Load selected ISO !
     ; Don't do the "CD001", .TXT files checks... for now
     ; Get the first cluster index
 	lea     ISOFilesList,a0
-	move.w  MenuCursor,d0
+	moveq.l #0,d0
+	move.b  MenuCursor,d0
+	andi.b  #$7F,d0
+	add.b   MenuShift,d0
 	lsl.w   #4,d0				; ISOFilesList has 16-byte entries
 	move.l  12(a0,d0),d0        ; $10D20C ok
 	add.l   d0,d0				; FAT32 has 4-byte cluster entries

@@ -70,6 +70,7 @@ ErrFixStrList:
     dc.l FixStrStartReadFailed
     dc.l FixStrBadSignature
     dc.l FixStrBadFSType
+    dc.l FixStrCMD8Timeout
 
 FixStrInterfaceTimeout:				; 0
 	dc.b "SPI interface timeout",0
@@ -91,3 +92,5 @@ FixStrBadSignature:					; 8
 	dc.b "Bad boot record signature",0
 FixStrBadFSType:					; 9
 	dc.b "Filesystem is not FAT32",0
+FixStrCMD8Timeout:					; 10
+	dc.b "CMD8 timeout",0

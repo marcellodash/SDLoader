@@ -56,8 +56,11 @@ InitSD:
 .ok0:
 
 	move.w  #$0037,d0			; CS low, low speed, CMD55
+	move.l  #0,d2				; No parameter
 	jsr     SDCommand
+	jsr     GetR1				; Ignore
 	move.w  #$0029,d0			; CS low, low speed, ACMD41
+	move.l  #0,d2				; No parameter	$40000000 ?
 	jsr     SDCommand
 	jsr     GetR1
 	move.w  #0,d5				; Default card type: MMC
@@ -67,14 +70,18 @@ InitSD:
 .mmc:
 	move.w  d5,CardType
 
+	move.w  CardType,d5
     move.b  #200,d7				; Max tries
 .init:
 	jsr     Delay
 	tst.b   d5
 	beq     .mmc_init
 	move.w  #$0037,d0			; CS low, low speed, CMD55
+	move.l  #0,d2				; No parameter
 	jsr     SDCommand
+	jsr     GetR1				; Ignore
 	move.w  #$0029,d0			; CS low, low speed, ACMD41
+	move.l  #0,d2				; No parameter	$40000000 ?
 	jsr     SDCommand
 	bra     .sdc_init
 .mmc_init:
@@ -108,6 +115,24 @@ InitSD:
 	moveq.l #4,d0				; Error step 4: Can't set block length
 	jmp		ErrSD
 .blocklenok:
+
+	; Stop any previous multiple-read
+	; TODO: Probably not necessary to try multiple times
+	move.w  #$010C,d0			; CS low, high speed, CMD12
+	moveq.l #0,d2
+	jsr     SDCommand
+	moveq.l #200,d6				; Max tries
+.trystop:
+	move.b  d0,REG_DIPSW
+	move.w  #$01FF,d0			; CS low, high speed, data all ones
+	jsr     PutByteSPI
+	cmp.b   #$FF,d0
+	beq     .notbusy
+	subq.b  #1,d6
+	bne     .trystop
+	moveq.l #6,d0				; CMD12 failed
+	jmp		ErrSD
+.notbusy:
 
 	; We can go full speed now
 	move.w  #$0200,d0			; CS high
@@ -163,28 +188,40 @@ SDCommand:
 	jsr     PutByteSPI
 
 	rol.l   #8,d2               ; Parameter AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD
+    move.w  d1,d0
 	move.b  d2,d0               ;           BBBBBBBB CCCCCCCC DDDDDDDD AAAAAAAA
 	jsr     PutByteSPI
 	rol.l   #8,d2				;           CCCCCCCC DDDDDDDD AAAAAAAA BBBBBBBB
+    move.w  d1,d0
 	move.b  d2,d0
 	jsr     PutByteSPI
 	rol.l   #8,d2				;           DDDDDDDD AAAAAAAA BBBBBBBB CCCCCCCC
+    move.w  d1,d0
 	move.b  d2,d0
 	jsr     PutByteSPI
 	rol.l   #8,d2				;           AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD
+    move.w  d1,d0
 	move.b  d2,d0
 	jsr     PutByteSPI
 
-	move.w  #$00FF,d0			; Ignored CRC
 	tst.b   d1
-	bne     .not_cmd0
-	move.w  #$0095,d0			; CMD0's CRC (slow)
-.not_cmd0:
+	beq     .crc_cmd0
+	cmp.b   #$08,d1
+	beq     .crc_cmd8
+	move.w  #$00FF,d0			; Ignored CRC
+.cmd_ret:
 	jsr     PutByteSPI
 
 	move.w  #$00FF,d0			; Just clock pulses
 	jsr     PutByteSPI
 	rts
+	
+.crc_cmd0:
+	move.w  #$0095,d0			; CMD0's CRC
+	bra     .cmd_ret
+.crc_cmd8:
+	move.w  #$0087,d0			; CMD8's CRC
+	bra     .cmd_ret
 
 
 PutByteSPI:
@@ -229,9 +266,8 @@ PutByteSPI:
 	rts
 	
 	
+; Uses d0,d4,a0
 PutByteSPIFast:
-	move.b  d0,REG_DIPSW
-
     move.w  SDREG_CSLOW,d4          ; 16
 
 	movea.l #SDREG_DOUTBASE,a0		; 12
@@ -243,10 +279,10 @@ PutByteSPIFast:
 	; Wait for interface not busy
 	move.w  #$FFFF,d4				; 8
 .wait:
+	;move.b  d0,REG_DIPSW            ; 16
 	move.w  SDREG_STATUS,d0         ; 16
-	btst.l  #0,d0                   ; 10
+	andi.b  #1,d0                   ; 8
 	beq     .done                   ; 10/8
-	move.b  d0,REG_DIPSW            ; 16
 	nop                             ; 4
 	subq.w  #1,d4                   ; 4
 	bne     .wait                   ; 10/8
@@ -332,14 +368,14 @@ LoadRawSectorFromSD:
 	lea     SDSectorBuffer,a1
 
 	; Wait for data token
-	moveq.l #200,d6				; Max tries
+	move.l  #20000,d6			; Max tries
 .try:
 	move.b  d0,REG_DIPSW
 	move.w  #$01FF,d0			; CS low, high speed, data all ones
 	jsr     PutByteSPIFast
 	cmp.b   #$FE,d0
 	beq     .gottoken
-	subq.b  #1,d6
+	subq.l  #1,d6
 	bne     .try
 	moveq.l #5,d0				; Didn't get the data token in time
 	jmp		ErrSD
@@ -371,14 +407,14 @@ LoadCDSectorFromSD:
 .readsectors:
 
 	; Wait for data token
-	moveq.l #200,d6				; Max tries
+	move.l  #20000,d6			; Max tries
 .try:
 	move.b  d0,REG_DIPSW
 	move.w  #$01FF,d0			; CS low, high speed, data all ones
 	jsr     PutByteSPIFast
 	cmp.b   #$FE,d0
 	beq     .gottoken
-	subq.b  #1,d6
+	subq.l  #1,d6
 	bne     .try
 	moveq.l #5,d0				; Didn't get the data token in time
 	jmp		ErrSD
@@ -400,13 +436,14 @@ LoadCDSectorFromSD:
 	tst.b   d7
 	bne     .readsectors
 
-	move.b  d0,REG_DIPSW
-	move.b  BIOS_P1CURRENT,d0	; Stall and go to memory viewer on C+D press during loading
-    cmp.b   #$C0,d0
-	bne     .go_on
-	lea     $0,a1				; Dump memory starting from $000000 and lock up
-	jmp     MemoryViewer
-.go_on:
+	; DEBUG
+;	move.b  d0,REG_DIPSW
+;	move.b  BIOS_P1CURRENT,d0	; Stall and go to memory viewer on C+D press during loading
+;    cmp.b   #$C0,d0
+;	bne     .go_on
+;	lea     $0,a1				; Dump memory starting from $000000 and lock up
+;	jmp     MemoryViewer
+;.go_on:
 
 	;lea     FixValueList,a0		; SLOW! Used only for debug
 	;move.l  SDLoadStart,(a0)+
@@ -415,7 +452,7 @@ LoadCDSectorFromSD:
 	;jsr     WriteFix            ; Display absolute address of loading start in SD card and Subsector (3~0)
 
 	; For original progressbar update:
-	move.b  d0,REG_DIPSW
+	;move.b  d0,REG_DIPSW
 	move.l  $10F690,d0
 	add.l   $10F68C,d0
 	cmpi.l  #$800000,d0

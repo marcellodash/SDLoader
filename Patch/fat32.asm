@@ -50,8 +50,10 @@
 ParseSDFiles:
 	move.b  #$FF,$FF0183		; REG_Z80RST, copied from original routine
 
-	move.w  #0,MenuCursor
-	move.w  #$100,MenuCursorPrev	; Force update (the 1 will be masked)
+	move.b  #0,MenuCursor
+	move.b  #$80,MenuCursorPrev	; Force update (the MSB will be masked out)
+	move.b  #0,MenuShift
+	move.b  #0,ISOFilesCount
 
 	; Clear ISO files list
 	moveq.l #0,d0
@@ -71,7 +73,7 @@ ParseSDFiles:
 	jsr		CheckSignature		; Check MBR signature
 
     ; Read first partition's start LBA
-	lea     SDSectorBuffer+$1C6,a0
+	lea     MBR_PSTARTLBA,a0
 	jsr     GetLELongword
     lsl.l   #8,d0				; *512
     add.l   d0,d0
@@ -83,7 +85,7 @@ ParseSDFiles:
 	jsr		CheckSignature		; Check FAT32 boot record signature
 
 	; Check "FAT32" string
-	lea     SDSectorBuffer+$52,a0
+	lea     FAT32_EBPBTYPE,a0
 	lea     StrFAT32,a1
 	jsr     CompareStrings
 	beq     .fat32_ok
@@ -92,19 +94,19 @@ ParseSDFiles:
 .fat32_ok:
 	
 	; Load partition parameters
-	lea     SDSectorBuffer+$0B,a0
+	lea     FAT32_BYTESPERSECT,a0
 	jsr     GetLEWord
 	move.w  d0,BYTESPERSECTOR
-	move.b  SDSectorBuffer+$0D,SECTORSPERCLUSTER
-	lea     SDSectorBuffer+$0E,a0
+	move.b  FAT32_SECTPERCLUST,SECTORSPERCLUSTER
+	lea     FAT32_RESERVEDSECT,a0
 	jsr     GetLEWord
 	move.w  d0,RESERVEDSECTORS
-	move.b  SDSectorBuffer+$10,FATCOUNT
-	move.b  SDSectorBuffer+$15,MEDIADESC
-	lea     SDSectorBuffer+$24,a0
+	move.b  FAT32_FATCOUNT,FATCOUNT
+	move.b  FAT32_MEDIADESC,MEDIADESC
+	lea     FAT32_SECTPERFAT,a0
 	jsr     GetLELongword
 	move.l  d0,FATSECTORS
-	lea     SDSectorBuffer+$2C,a0
+	lea     FAT32_ROOTCLUSTER,a0
 	jsr     GetLELongword
 	move.l  d0,ROOTSTART
 
@@ -194,12 +196,14 @@ ParseSDFiles:
 	move.l  0(a1),0(a2)
 	move.l  4(a1),4(a2)
 	; Copy start cluster address
-	lea     $14(a1),a0
+	lea     DIR_STARTCLUST_H(a1),a0
 	jsr     GetLEWord
 	move.w  d0,12(a2)
-	lea     $1A(a1),a0
+	lea     DIR_STARTCLUST_L(a1),a0
 	jsr     GetLEWord
 	move.w  d0,14(a2)
+
+	addq.b  #1,ISOFilesCount
 
 	subq.w  #1,d7
 	beq     .root_end			; Max files reached
@@ -234,29 +238,8 @@ ParseSDFiles:
     move.b  #0,8(a0)				; Terminate string
 	move.w  #FIXMAP+7+(10*32),d0
 	jsr     WriteFix
-
-	; Display ISO file names (and their first cluster index)
-	lea     ISOFilesList,a1
-	move.w  #FIXMAP+9+(10*32),d2
-.disp_filenames:
-	tst.b   (a1)
-	beq     .disp_done
-	movea.l a1,a0
-	move.w  d2,d0
-	jsr     WriteFix
-
-	move.l  12(a1),d0			; Get first cluster index
-    lea     FixValueList,a0
-	move.l  d0,(a0)
-	move.w  d2,d0
-	addi.w  #9*32,d0			; Move right
-    lea     FixStrClusterIdx,a0
-	jsr     WriteFix
-
-	addi.w  #1,d2				; Next line
-    lea     16(a1),a1			; Next entry
-	bra     .disp_filenames
-.disp_done:
+	
+	jsr		DrawISOList
 
 	move.b  #1,REG_ENVIDEO
 	move.b  #0,REG_DISBLSPR
@@ -266,7 +249,7 @@ ParseSDFiles:
 
 
 CheckSignature:
-	cmp.w   #$55AA,SDSectorBuffer+$1FE
+	cmp.w   #$55AA,MBR_SIGNATURE
 	beq     .sig_ok
 	moveq.l #8,d0				; Bad signature
 	jmp		ErrSD
